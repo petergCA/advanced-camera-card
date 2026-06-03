@@ -1,0 +1,22 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Build distributable
+        run: npm run build
+      - name: Validate distributable
+        run: npm run validate
+      - name: Validate package metadata
+        run: node -e "JSON.parse(require('fs').readFileSync('hacs.json', 'utf8')); JSON.parse(require('fs').readFileSync('package.json', 'utf8'));"
