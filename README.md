@@ -104,6 +104,8 @@ cameras:
 | `default_camera` | string | first camera key | Camera shown when no rules match. |
 | `auto_reset_minutes` | number | `0` | Minutes before a manual override resets to Auto. `0` disables the timer. |
 | `compact` | boolean | `false` | Slightly tighter padding and reduced grid row count. |
+| `preload_cameras` | boolean | `false` | Load all camera cards at startup in hidden slots so switching is instant. Trades memory for zero-latency camera changes. |
+| `card_height` | number | — | Fix the camera host to this height in pixels. Useful when cameras have different aspect ratios and you want a stable layout. |
 | `webrtc_defaults` | object | see below | Default options passed to `custom:webrtc-camera` for every camera. |
 | `cameras` | object | **required** | Camera definitions keyed by a unique camera id. |
 

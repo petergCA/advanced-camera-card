@@ -36,6 +36,7 @@ class AdvancedCameraCard extends HTMLElement {
       show_controls: true,
       compact: false,
       preload_cameras: false,
+      card_height: null,
       webrtc_defaults: {
         muted: true,
         mode: "webrtc",
@@ -155,6 +156,7 @@ class AdvancedCameraCard extends HTMLElement {
 
         .camera-host {
           padding: 8px 10px 6px;
+          overflow: hidden;
         }
 
         .camera-host.compact {
@@ -280,7 +282,9 @@ class AdvancedCameraCard extends HTMLElement {
     const modePill = this.shadowRoot.querySelector(".mode-pill");
     modePill.textContent = this._manualCamera ? "Manual" : "Auto";
     modePill.style.display = this._config.show_mode_pill === false ? "none" : "";
-    this.shadowRoot.querySelector(".camera-host").classList.toggle("compact", !!this._config.compact);
+    const cameraHost = this.shadowRoot.querySelector(".camera-host");
+    cameraHost.classList.toggle("compact", !!this._config.compact);
+    cameraHost.style.height = this._config.card_height ? `${this._config.card_height}px` : "";
     this.shadowRoot.querySelector(".controls-bar").classList.toggle("hidden", this._config.show_controls === false);
 
     await this._renderCamera(activeKey, activeCamera);
