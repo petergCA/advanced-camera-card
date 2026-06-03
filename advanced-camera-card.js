@@ -313,8 +313,9 @@ class AdvancedCameraCard extends HTMLElement {
     for (const [key, camera] of Object.entries(this._config.cameras)) {
       if (!Array.isArray(camera.show_when) || camera.show_when.length === 0) continue;
 
-      const matchMode = camera.match || "all";
-      const matched = matchMode === "any"
+      const matchMode = camera.operator || camera.match || "all";
+      const isOr = matchMode === "any" || matchMode === "or";
+      const matched = isOr
         ? camera.show_when.some((condition) => this._conditionMatches(condition))
         : camera.show_when.every((condition) => this._conditionMatches(condition));
 
@@ -375,6 +376,15 @@ class AdvancedCameraCard extends HTMLElement {
 
   _conditionMatches(condition) {
     if (!condition) return false;
+
+    // Nested group: { operator: "or"/"and", conditions: [...] }
+    if (Array.isArray(condition.conditions)) {
+      const op = condition.operator || "and";
+      const isOr = op === "or" || op === "any";
+      return isOr
+        ? condition.conditions.some((c) => this._conditionMatches(c))
+        : condition.conditions.every((c) => this._conditionMatches(c));
+    }
 
     if (condition.type === "time") {
       return this._timeMatches(condition);

@@ -146,7 +146,7 @@ webrtc_defaults:
 | `linger_seconds` | number | Seconds this camera stays visible after its `show_when` condition clears. Overrides `default_linger_seconds`. |
 | `linger_reason` | string | Reason text shown during the linger delay. Falls back to `reason` if not set. |
 | `show_when` | array | List of conditions that trigger this camera. Evaluated top-to-bottom across all cameras. |
-| `match` | string | `all` (default) or `any` — how multiple `show_when` conditions are combined. |
+| `operator` | string | `and` (default) or `or` — how multiple `show_when` conditions are combined. `match` is accepted as an alias for backward compatibility. |
 | `card_type` | string | Child card type. Defaults to `custom:webrtc-camera`. |
 | `mode` | string | WebRTC mode for this camera. Overrides `webrtc_defaults.mode`. |
 | `ui` | boolean | Show the WebRTC UI for this camera. Overrides `webrtc_defaults.ui`. |
@@ -206,16 +206,66 @@ show_when:
 
 Time windows that cross midnight are supported (e.g. `after: "22:00"`, `before: "06:00"`).
 
-### Multiple conditions
+### Multiple conditions (AND / OR)
+
+Use `operator` at the camera level to control how the conditions in `show_when` are combined.
+
+**OR — show when any condition is true:**
 
 ```yaml
-show_when:
-  - entity: binary_sensor.front_door
-    state: "on"
-  - entity: input_boolean.camera_override
-    state: "on"
-match: any   # default is "all"
+cameras:
+  porch:
+    name: Porch
+    icon: mdi:cctv
+    entity: camera.porch
+    operator: or
+    show_when:
+      - entity: binary_sensor.doorbell_motion
+        state: "on"
+      - entity: binary_sensor.porch_person
+        state: "on"
 ```
+
+**AND — show only when all conditions are true (default):**
+
+```yaml
+cameras:
+  entry:
+    name: Entry
+    icon: mdi:cctv
+    entity: camera.entry
+    operator: and   # default, can be omitted
+    show_when:
+      - entity: binary_sensor.entry_motion
+        state: "on"
+      - entity: input_boolean.security_armed
+        state: "on"
+```
+
+### Nested condition groups
+
+For more complex logic, a `show_when` entry can itself be a condition group with its own `operator` and `conditions` list. This lets you mix AND and OR in a single rule.
+
+**Show when security is armed AND (doorbell has motion OR porch has a person):**
+
+```yaml
+cameras:
+  porch:
+    name: Porch
+    entity: camera.porch
+    operator: and
+    show_when:
+      - entity: input_boolean.security_armed
+        state: "on"
+      - operator: or
+        conditions:
+          - entity: binary_sensor.doorbell_motion
+            state: "on"
+          - entity: binary_sensor.porch_person
+            state: "on"
+```
+
+Nesting works to any depth — each group can contain plain conditions or further nested groups.
 
 ## Linger delay
 
