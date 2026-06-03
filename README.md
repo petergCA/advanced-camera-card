@@ -10,6 +10,7 @@ This card is designed to wrap `custom:webrtc-camera`, but you can override the c
 
 - Automatic camera switching based on entity state, numeric threshold, or time window
 - Priority-ordered rules — cameras are evaluated top-to-bottom
+- Configurable linger delay keeps a triggered camera visible for N seconds after its condition clears
 - Manual override with per-camera chip buttons
 - Mute / unmute button for the active feed
 - Optional auto-reset back to Auto mode after a configurable timeout
@@ -103,6 +104,7 @@ cameras:
 | `title` | string | `Cameras` | Header title text. |
 | `default_camera` | string | first camera key | Camera shown when no rules match. |
 | `auto_reset_minutes` | number | `0` | Minutes before a manual override resets to Auto. `0` disables the timer. |
+| `default_linger_seconds` | number | `0` | Seconds any triggered camera stays visible after its `show_when` condition clears. Applied to cameras that do not set their own `linger_seconds`. `0` disables the delay. |
 | `compact` | boolean | `false` | Slightly tighter padding and reduced grid row count. |
 | `preload_cameras` | boolean | `false` | Load all camera cards at startup in hidden slots so switching is instant. Trades memory for zero-latency camera changes. |
 | `card_height` | number | — | Fix the camera host to this height in pixels. Useful when cameras have different aspect ratios and you want a stable layout. |
@@ -141,6 +143,8 @@ webrtc_defaults:
 | `icon` | string | Material Design Icon for the chip (e.g. `mdi:cctv`). |
 | `entity` | string | Camera entity id. |
 | `reason` | string | Custom reason text shown next to the title when this camera is active. |
+| `linger_seconds` | number | Seconds this camera stays visible after its `show_when` condition clears. Overrides `default_linger_seconds`. |
+| `linger_reason` | string | Reason text shown during the linger delay. Falls back to `reason` if not set. |
 | `show_when` | array | List of conditions that trigger this camera. Evaluated top-to-bottom across all cameras. |
 | `match` | string | `all` (default) or `any` — how multiple `show_when` conditions are combined. |
 | `card_type` | string | Child card type. Defaults to `custom:webrtc-camera`. |
@@ -212,6 +216,45 @@ show_when:
     state: "on"
 match: any   # default is "all"
 ```
+
+## Linger delay
+
+By default a camera switches away the moment its `show_when` condition clears. `linger_seconds` holds the feed for that many seconds before reverting to the default camera. If the condition becomes active again before the delay expires the countdown is cancelled and the camera stays live.
+
+Set a per-camera value:
+
+```yaml
+cameras:
+  entry:
+    entity: camera.entry
+    linger_seconds: 30
+    show_when:
+      - entity: binary_sensor.entry_motion
+        state: "on"
+```
+
+Or set a global default that applies to every camera without its own `linger_seconds`:
+
+```yaml
+type: custom:advanced-camera-card
+default_linger_seconds: 20
+cameras:
+  ...
+```
+
+`linger_seconds: 0` (or omitting both options) restores the instant-switch behaviour.
+
+The `linger_reason` option customises the status text shown in the header during the delay:
+
+```yaml
+entry:
+  entity: camera.entry
+  linger_seconds: 30
+  reason: Entry motion detected
+  linger_reason: Entry — motion cleared, holding
+```
+
+The linger works with **any** `show_when` condition type — entity state, numeric threshold, or time window. No special entity naming or device class is required.
 
 ## Runtime controls
 

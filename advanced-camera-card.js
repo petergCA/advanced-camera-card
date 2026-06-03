@@ -13,6 +13,9 @@ class AdvancedCameraCard extends HTMLElement {
     this._muted = true;
     this._cameraCards = {};
     this._preloadStarted = false;
+    this._lingerTimer = null;
+    this._lingerCameraKey = null;
+    this._lingerDone = new Set();
   }
 
   setConfig(config) {
@@ -292,6 +295,12 @@ class AdvancedCameraCard extends HTMLElement {
     this._updateMuteButton();
   }
 
+  _clearLinger() {
+    if (this._lingerTimer) clearTimeout(this._lingerTimer);
+    this._lingerTimer = null;
+    this._lingerCameraKey = null;
+  }
+
   _chooseCamera() {
     if (this._manualCamera && this._config.cameras[this._manualCamera]) {
       const cam = this._config.cameras[this._manualCamera];
@@ -310,9 +319,50 @@ class AdvancedCameraCard extends HTMLElement {
         : camera.show_when.every((condition) => this._conditionMatches(condition));
 
       if (matched) {
+        // Condition active — cancel any linger for a different camera
+        if (this._lingerCameraKey && this._lingerCameraKey !== key) {
+          this._clearLinger();
+        }
+        // Reset linger-done so it can linger again next time this condition clears
+        this._lingerDone.delete(key);
         return {
           key,
           reason: camera.reason || this._reasonFor(camera, key),
+        };
+      }
+    }
+
+    // No condition matched — hold the current camera if a linger is running
+    if (this._lingerTimer && this._lingerCameraKey) {
+      const cam = this._config.cameras[this._lingerCameraKey];
+      if (cam) {
+        return {
+          key: this._lingerCameraKey,
+          reason: cam.linger_reason || cam.reason || this._reasonFor(cam, this._lingerCameraKey),
+        };
+      }
+    }
+
+    // Start a linger if the camera we're leaving had linger_seconds configured
+    const prevKey = this._activeCameraKey;
+    if (
+      prevKey &&
+      prevKey !== this._config.default_camera &&
+      !this._lingerTimer &&
+      !this._lingerDone.has(prevKey)
+    ) {
+      const prevCam = this._config.cameras[prevKey];
+      const secs = Number(prevCam?.linger_seconds ?? this._config.default_linger_seconds ?? 0);
+      if (secs > 0) {
+        this._lingerCameraKey = prevKey;
+        this._lingerTimer = setTimeout(() => {
+          this._lingerDone.add(prevKey);
+          this._clearLinger();
+          this._update();
+        }, secs * 1000);
+        return {
+          key: prevKey,
+          reason: prevCam.linger_reason || prevCam.reason || this._reasonFor(prevCam, prevKey),
         };
       }
     }
