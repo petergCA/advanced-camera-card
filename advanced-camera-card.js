@@ -11,6 +11,8 @@ class AdvancedCameraCard extends HTMLElement {
     this._lastRenderKey = null;
     this._renderingKey = null;
     this._muted = true;
+    this._cameraCards = {};
+    this._preloadStarted = false;
   }
 
   setConfig(config) {
@@ -33,6 +35,7 @@ class AdvancedCameraCard extends HTMLElement {
       show_mode_pill: true,
       show_controls: true,
       compact: false,
+      preload_cameras: false,
       webrtc_defaults: {
         muted: true,
         mode: "webrtc",
@@ -47,6 +50,8 @@ class AdvancedCameraCard extends HTMLElement {
     }
 
     this._muted = this._config.webrtc_defaults?.muted ?? true;
+    this._cameraCards = {};
+    this._preloadStarted = false;
     this._renderBase();
     this._update();
   }
@@ -385,6 +390,10 @@ class AdvancedCameraCard extends HTMLElement {
   }
 
   async _renderCamera(activeKey, camera) {
+    if (this._config.preload_cameras) {
+      return this._renderCameraPreloaded(activeKey);
+    }
+
     if (this._activeCameraKey === activeKey && this._childCard) {
       this._childCard.hass = this._hass;
       return;
@@ -422,6 +431,89 @@ class AdvancedCameraCard extends HTMLElement {
       this._showEmpty(`Could not load camera card: ${err.message}`);
     } finally {
       if (this._renderingKey === activeKey) this._renderingKey = null;
+    }
+  }
+
+  _renderCameraPreloaded(activeKey) {
+    // Pass hass updates to all already-loaded background cards
+    for (const card of Object.values(this._cameraCards)) {
+      card.hass = this._hass;
+    }
+
+    // No switch needed if already on this camera
+    if (this._activeCameraKey === activeKey && this._childCard) return;
+
+    // First call: create a hidden slot per camera and kick off async loading
+    if (!this._preloadStarted) {
+      this._preloadStarted = true;
+      const host = this.shadowRoot.querySelector(".camera-host");
+      host.innerHTML = "";
+      for (const key of Object.keys(this._config.cameras)) {
+        const slot = document.createElement("div");
+        slot.dataset.cameraKey = key;
+        slot.style.display = "none";
+        host.appendChild(slot);
+      }
+      this._loadAllCameraCards();
+    }
+
+    // Show the active slot, hide the rest
+    const host = this.shadowRoot.querySelector(".camera-host");
+    host.querySelectorAll("[data-camera-key]").forEach(slot => {
+      slot.style.display = slot.dataset.cameraKey === activeKey ? "" : "none";
+    });
+
+    this._activeCameraKey = activeKey;
+    this._childCard = this._cameraCards[activeKey] || null;
+
+    // Sync current mute state to the newly visible camera
+    if (this._childCard) {
+      const video = this._childCard.querySelector("video") ||
+                    this._childCard.shadowRoot?.querySelector("video");
+      if (video) video.muted = this._muted;
+    }
+  }
+
+  async _loadAllCameraCards() {
+    const defaults = this._config.webrtc_defaults || {};
+    const host = this.shadowRoot?.querySelector(".camera-host");
+    if (!host) return;
+
+    try {
+      const helpers = await window.loadCardHelpers();
+      for (const [key, camera] of Object.entries(this._config.cameras)) {
+        if (this._cameraCards[key]) continue;
+        const slot = host.querySelector(`[data-camera-key="${key}"]`);
+        if (!slot) continue;
+
+        const cardConfig = {
+          type: camera.card_type || "custom:webrtc-camera",
+          entity: camera.entity,
+          muted: this._muted,
+          mode: camera.mode || defaults.mode || "webrtc",
+          ui: camera.ui ?? defaults.ui ?? false,
+          style: camera.style || defaults.style || ".mode {display: none}",
+          ...(camera.card_options || {}),
+        };
+
+        try {
+          const card = await helpers.createCardElement(cardConfig);
+          card.hass = this._hass;
+          this._cameraCards[key] = card;
+          slot.appendChild(card);
+
+          // If this camera just finished loading and it's already the active one, wire it up
+          if (key === this._activeCameraKey) {
+            this._childCard = card;
+            const video = card.querySelector("video") || card.shadowRoot?.querySelector("video");
+            if (video) video.muted = this._muted;
+          }
+        } catch (err) {
+          console.warn(`advanced-camera-card: failed to preload camera "${key}":`, err);
+        }
+      }
+    } catch (err) {
+      console.warn("advanced-camera-card: preload init failed:", err);
     }
   }
 
