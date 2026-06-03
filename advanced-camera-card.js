@@ -9,6 +9,8 @@ class AdvancedCameraCard extends HTMLElement {
     this._activeCameraKey = null;
     this._childCard = null;
     this._lastRenderKey = null;
+    this._renderingKey = null;
+    this._muted = true;
   }
 
   setConfig(config) {
@@ -27,6 +29,8 @@ class AdvancedCameraCard extends HTMLElement {
       auto_reset_minutes: 0,
       show_reason: true,
       show_header: true,
+      show_title: true,
+      show_mode_pill: true,
       show_controls: true,
       compact: false,
       webrtc_defaults: {
@@ -42,6 +46,7 @@ class AdvancedCameraCard extends HTMLElement {
       throw new Error(`default_camera "${this._config.default_camera}" is not defined in cameras`);
     }
 
+    this._muted = this._config.webrtc_defaults?.muted ?? true;
     this._renderBase();
     this._update();
   }
@@ -108,7 +113,12 @@ class AdvancedCameraCard extends HTMLElement {
         }
 
         .title-wrap {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          flex: 1;
           min-width: 0;
+          overflow: hidden;
         }
 
         .title {
@@ -116,15 +126,17 @@ class AdvancedCameraCard extends HTMLElement {
           font-weight: 600;
           line-height: 1.2;
           color: var(--primary-text-color);
+          white-space: nowrap;
         }
 
         .reason {
-          margin-top: 2px;
           font-size: 12px;
           color: var(--secondary-text-color);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          flex: 1;
+          min-width: 0;
         }
 
         .mode-pill {
@@ -144,7 +156,18 @@ class AdvancedCameraCard extends HTMLElement {
           padding: 6px 8px 4px;
         }
 
+        .controls-bar {
+          display: flex;
+          align-items: center;
+        }
+
+        .controls-bar.hidden {
+          display: none;
+        }
+
         .chips {
+          flex: 1;
+          min-width: 0;
           display: flex;
           gap: 7px;
           padding: 6px 10px 12px;
@@ -152,12 +175,14 @@ class AdvancedCameraCard extends HTMLElement {
           scrollbar-width: none;
         }
 
-        .chips.hidden {
+        .chips::-webkit-scrollbar {
           display: none;
         }
 
-        .chips::-webkit-scrollbar {
-          display: none;
+        .mute-wrap {
+          flex-shrink: 0;
+          padding: 6px 10px 12px;
+          padding-left: 0;
         }
 
         button.chip {
@@ -206,9 +231,18 @@ class AdvancedCameraCard extends HTMLElement {
           <div class="mode-pill"></div>
         </div>
         <div class="camera-host"></div>
-        <div class="chips"></div>
+        <div class="controls-bar">
+          <div class="chips"></div>
+          <div class="mute-wrap">
+            <button class="chip mute-btn" type="button" aria-label="Toggle mute">
+              <ha-icon icon="mdi:volume-off"></ha-icon>
+            </button>
+          </div>
+        </div>
       </ha-card>
     `;
+
+    this.shadowRoot.querySelector(".mute-btn").addEventListener("click", () => this._toggleMute());
   }
 
   async _update() {
@@ -226,7 +260,9 @@ class AdvancedCameraCard extends HTMLElement {
     const header = this.shadowRoot.querySelector(".header");
     header.classList.toggle("hidden", this._config.show_header === false);
 
-    this.shadowRoot.querySelector(".title").textContent = this._config.title || "Cameras";
+    const titleEl = this.shadowRoot.querySelector(".title");
+    titleEl.textContent = this._config.title || "Cameras";
+    titleEl.style.display = this._config.show_title === false ? "none" : "";
 
     const reasonEl = this.shadowRoot.querySelector(".reason");
     if (this._config.show_reason === false) {
@@ -236,12 +272,15 @@ class AdvancedCameraCard extends HTMLElement {
       reasonEl.textContent = decision.reason;
     }
 
-    this.shadowRoot.querySelector(".mode-pill").textContent = this._manualCamera ? "Manual" : "Auto";
+    const modePill = this.shadowRoot.querySelector(".mode-pill");
+    modePill.textContent = this._manualCamera ? "Manual" : "Auto";
+    modePill.style.display = this._config.show_mode_pill === false ? "none" : "";
     this.shadowRoot.querySelector(".camera-host").classList.toggle("compact", !!this._config.compact);
-    this.shadowRoot.querySelector(".chips").classList.toggle("hidden", this._config.show_controls === false);
+    this.shadowRoot.querySelector(".controls-bar").classList.toggle("hidden", this._config.show_controls === false);
 
     await this._renderCamera(activeKey, activeCamera);
     this._renderChips(activeKey);
+    this._updateMuteButton();
   }
 
   _chooseCamera() {
@@ -351,7 +390,12 @@ class AdvancedCameraCard extends HTMLElement {
       return;
     }
 
+    // Guard against concurrent renders for the same key while awaiting card helpers
+    if (this._renderingKey === activeKey) return;
+    this._renderingKey = activeKey;
+
     this._activeCameraKey = activeKey;
+    this._childCard = null;
     const host = this.shadowRoot.querySelector(".camera-host");
     host.innerHTML = "";
 
@@ -359,7 +403,7 @@ class AdvancedCameraCard extends HTMLElement {
     const cardConfig = {
       type: camera.card_type || "custom:webrtc-camera",
       entity: camera.entity,
-      muted: camera.muted ?? defaults.muted ?? true,
+      muted: this._muted,
       mode: camera.mode || defaults.mode || "webrtc",
       ui: camera.ui ?? defaults.ui ?? false,
       style: camera.style || defaults.style || ".mode {display: none}",
@@ -368,12 +412,16 @@ class AdvancedCameraCard extends HTMLElement {
 
     try {
       const helpers = await window.loadCardHelpers();
+      if (this._renderingKey !== activeKey) return;
       const card = await helpers.createCardElement(cardConfig);
+      if (this._renderingKey !== activeKey) return;
       card.hass = this._hass;
       this._childCard = card;
       host.appendChild(card);
     } catch (err) {
       this._showEmpty(`Could not load camera card: ${err.message}`);
+    } finally {
+      if (this._renderingKey === activeKey) this._renderingKey = null;
     }
   }
 
@@ -397,7 +445,7 @@ class AdvancedCameraCard extends HTMLElement {
       chips.appendChild(this._makeChip({
         name: camera.name || key,
         icon: camera.icon || "mdi:cctv",
-        active: this._manualCamera ? this._manualCamera === key : activeKey === key,
+        active: !!this._manualCamera && this._manualCamera === key,
         onClick: () => this._setManualCamera(key),
       }));
     }
@@ -410,6 +458,31 @@ class AdvancedCameraCard extends HTMLElement {
     button.innerHTML = `<ha-icon icon="${icon}"></ha-icon><span>${name}</span>`;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  _updateMuteButton() {
+    const btn = this.shadowRoot?.querySelector(".mute-btn");
+    if (!btn) return;
+    btn.querySelector("ha-icon")?.setAttribute("icon", this._muted ? "mdi:volume-off" : "mdi:volume-high");
+    btn.classList.toggle("active", !this._muted);
+  }
+
+  _toggleMute() {
+    this._muted = !this._muted;
+    const video = this._getVideoElement();
+    if (video) video.muted = this._muted;
+    this._updateMuteButton();
+  }
+
+  _getVideoElement() {
+    if (!this._childCard) return null;
+    let video = this._childCard.querySelector("video");
+    if (video) return video;
+    if (this._childCard.shadowRoot) {
+      video = this._childCard.shadowRoot.querySelector("video");
+      if (video) return video;
+    }
+    return null;
   }
 
   _setManualCamera(key) {

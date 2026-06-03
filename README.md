@@ -8,11 +8,13 @@ This card is designed to wrap `custom:webrtc-camera`, but you can override the c
 
 ## Features
 
-- Automatic camera switching based on entity state
-- Time-window based camera switching
-- Manual override camera buttons
-- Optional auto-reset back to Auto mode
-- Priority based on camera order in YAML
+- Automatic camera switching based on entity state, numeric threshold, or time window
+- Priority-ordered rules — cameras are evaluated top-to-bottom
+- Manual override with per-camera chip buttons
+- Mute / unmute button for the active feed
+- Optional auto-reset back to Auto mode after a configurable timeout
+- Inline reason text next to the title to save vertical space
+- Fine-grained show/hide controls for every header element
 - Works well with `custom:webrtc-camera`
 - HACS-ready repository structure
 
@@ -44,13 +46,7 @@ If you manage resources manually, add the resource under **Settings > Dashboards
 
 ## Manual installation
 
-Copy this file:
-
-```text
-dist/advanced-camera-card.js
-```
-
-to:
+Copy `advanced-camera-card.js` to:
 
 ```text
 /config/www/advanced-camera-card.js
@@ -72,7 +68,6 @@ type: custom:advanced-camera-card
 title: Cameras
 default_camera: primary
 auto_reset_minutes: 10
-show_reason: true
 cameras:
   entry:
     name: Entry
@@ -101,23 +96,36 @@ cameras:
 
 ## Configuration
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `title` | string | `Cameras` | Header title. |
-| `default_camera` | string | first camera | Camera key used when no rules match. |
-| `auto_reset_minutes` | number | `0` | Minutes before manual override resets to Auto. `0` disables reset. |
-| `show_reason` | boolean | `true` | Shows the reason under the title. |
-| `show_header` | boolean | `true` | Shows or hides the header. |
-| `show_controls` | boolean | `true` | Shows or hides the Auto/camera chips. |
-| `compact` | boolean | `false` | Slightly tighter padding and grid sizing. |
-| `webrtc_defaults` | object | see below | Default options passed to `custom:webrtc-camera`. |
-| `cameras` | object | required | Camera definitions keyed by camera id. |
+### Card options
 
-Default `webrtc_defaults`:
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `title` | string | `Cameras` | Header title text. |
+| `default_camera` | string | first camera key | Camera shown when no rules match. |
+| `auto_reset_minutes` | number | `0` | Minutes before a manual override resets to Auto. `0` disables the timer. |
+| `compact` | boolean | `false` | Slightly tighter padding and reduced grid row count. |
+| `webrtc_defaults` | object | see below | Default options passed to `custom:webrtc-camera` for every camera. |
+| `cameras` | object | **required** | Camera definitions keyed by a unique camera id. |
+
+### Visibility options
+
+These can be set independently to show or hide each part of the card.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `show_header` | boolean | `true` | Show or hide the entire header row (title, reason, and mode pill). |
+| `show_title` | boolean | `true` | Show or hide the title text. |
+| `show_reason` | boolean | `true` | Show or hide the reason text shown next to the title. |
+| `show_mode_pill` | boolean | `true` | Show or hide the Auto / Manual pill. |
+| `show_controls` | boolean | `true` | Show or hide the camera chip buttons and mute button. |
+
+### `webrtc_defaults`
+
+Default values applied to every camera unless overridden at the camera level.
 
 ```yaml
 webrtc_defaults:
-  muted: true
+  muted: true   # also controls the initial state of the mute button
   mode: webrtc
   ui: false
   style: ".mode {display: none}"
@@ -126,15 +134,18 @@ webrtc_defaults:
 ## Camera options
 
 | Option | Type | Description |
-|---|---:|---|
-| `name` | string | Friendly name shown on the button. |
-| `icon` | string | Material Design Icon name. |
+|---|---|---|
+| `name` | string | Friendly name shown on the camera chip button. |
+| `icon` | string | Material Design Icon for the chip (e.g. `mdi:cctv`). |
 | `entity` | string | Camera entity id. |
-| `reason` | string | Optional custom reason text when this camera is auto-selected. |
-| `show_when` | array | List of conditions. |
-| `match` | string | `all` or `any` for multiple `show_when` conditions. Defaults to `all`. |
+| `reason` | string | Custom reason text shown next to the title when this camera is active. |
+| `show_when` | array | List of conditions that trigger this camera. Evaluated top-to-bottom across all cameras. |
+| `match` | string | `all` (default) or `any` — how multiple `show_when` conditions are combined. |
 | `card_type` | string | Child card type. Defaults to `custom:webrtc-camera`. |
-| `card_options` | object | Extra options merged into the child card config. |
+| `mode` | string | WebRTC mode for this camera. Overrides `webrtc_defaults.mode`. |
+| `ui` | boolean | Show the WebRTC UI for this camera. Overrides `webrtc_defaults.ui`. |
+| `style` | string | CSS injected into the WebRTC card for this camera. Overrides `webrtc_defaults.style`. |
+| `card_options` | object | Any extra options merged into the child card config. Takes highest precedence. |
 
 ## Conditions
 
@@ -144,6 +155,16 @@ webrtc_defaults:
 show_when:
   - entity: binary_sensor.example_motion
     state: "on"
+```
+
+`state` can also be a list — the condition matches if the entity is in any of the listed states:
+
+```yaml
+show_when:
+  - entity: alarm_control_panel.home
+    state:
+      - armed_home
+      - armed_away
 ```
 
 ### Entity not in state list
@@ -166,6 +187,8 @@ show_when:
     above: 0
 ```
 
+`above` and `below` can be used together for a range. Both are exclusive (`>` / `<`).
+
 ### Time window
 
 ```yaml
@@ -175,41 +198,27 @@ show_when:
     before: "16:15"
 ```
 
-Time windows that cross midnight are supported.
+Time windows that cross midnight are supported (e.g. `after: "22:00"`, `before: "06:00"`).
 
-## Development
+### Multiple conditions
 
-The HACS distributable file is:
-
-```text
-dist/advanced-camera-card.js
+```yaml
+show_when:
+  - entity: binary_sensor.front_door
+    state: "on"
+  - entity: input_boolean.camera_override
+    state: "on"
+match: any   # default is "all"
 ```
 
-The editable source copy is:
+## Runtime controls
 
-```text
-src/advanced-camera-card.js
-```
+The bottom bar contains two sets of controls.
 
-For this first version, there is no bundler. The build script simply copies `src/advanced-camera-card.js` to `dist/advanced-camera-card.js`.
+**Camera chips** (left) — an Auto chip resets to automatic switching; one chip per configured camera selects a manual override. A manual override stays active until the `auto_reset_minutes` timer expires or the user taps Auto.
 
-```bash
-npm run build
-```
-
-## Releasing
-
-For a clean HACS version number, create a GitHub release. Tags alone are not enough for HACS to use a version number.
-
-Suggested first release:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Then create a GitHub release from that tag.
+**Mute button** (right) — toggles audio on the active feed. The initial state comes from `webrtc_defaults.muted` (default `true`). The chosen state persists across camera switches within the same session but resets on page reload.
 
 ## Notes
 
-Manual override state is stored in the browser/card instance. It does not persist across page refreshes or across devices. A future version could optionally support a Home Assistant `input_select` for shared persistent override state.
+Manual override state is stored in the card instance only. It does not persist across page refreshes or devices. A future version could optionally back this with a Home Assistant `input_select` for shared persistent state.
