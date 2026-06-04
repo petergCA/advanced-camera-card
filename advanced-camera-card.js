@@ -301,6 +301,14 @@ class AdvancedCameraCard extends HTMLElement {
     this._lingerCameraKey = null;
   }
 
+  _isEntityCondition(condition) {
+    if (!condition) return false;
+    if (Array.isArray(condition.conditions)) {
+      return condition.conditions.some((c) => this._isEntityCondition(c));
+    }
+    return condition.type !== "time" && !!condition.entity;
+  }
+
   _chooseCamera() {
     if (this._manualCamera && this._config.cameras[this._manualCamera]) {
       const cam = this._config.cameras[this._manualCamera];
@@ -310,26 +318,33 @@ class AdvancedCameraCard extends HTMLElement {
       };
     }
 
-    for (const [key, camera] of Object.entries(this._config.cameras)) {
-      if (!Array.isArray(camera.show_when) || camera.show_when.length === 0) continue;
+    // Two-pass evaluation: entity/state conditions take priority over time conditions.
+    // Pass 1: cameras with at least one entity-based condition.
+    // Pass 2: cameras with only time-based conditions.
+    for (const pass of ["entity", "time"]) {
+      for (const [key, camera] of Object.entries(this._config.cameras)) {
+        if (!Array.isArray(camera.show_when) || camera.show_when.length === 0) continue;
 
-      const matchMode = camera.operator || camera.match || "all";
-      const isOr = matchMode === "any" || matchMode === "or";
-      const matched = isOr
-        ? camera.show_when.some((condition) => this._conditionMatches(condition))
-        : camera.show_when.every((condition) => this._conditionMatches(condition));
+        const hasEntity = camera.show_when.some((c) => this._isEntityCondition(c));
+        if (pass === "entity" && !hasEntity) continue;
+        if (pass === "time" && hasEntity) continue;
 
-      if (matched) {
-        // Condition active — cancel any linger for a different camera
-        if (this._lingerCameraKey && this._lingerCameraKey !== key) {
-          this._clearLinger();
+        const matchMode = camera.operator || camera.match || "all";
+        const isOr = matchMode === "any" || matchMode === "or";
+        const matched = isOr
+          ? camera.show_when.some((condition) => this._conditionMatches(condition))
+          : camera.show_when.every((condition) => this._conditionMatches(condition));
+
+        if (matched) {
+          if (this._lingerCameraKey && this._lingerCameraKey !== key) {
+            this._clearLinger();
+          }
+          this._lingerDone.delete(key);
+          return {
+            key,
+            reason: camera.reason || this._reasonFor(camera, key),
+          };
         }
-        // Reset linger-done so it can linger again next time this condition clears
-        this._lingerDone.delete(key);
-        return {
-          key,
-          reason: camera.reason || this._reasonFor(camera, key),
-        };
       }
     }
 
