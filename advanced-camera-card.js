@@ -695,5 +695,5 @@ window.customCards.push({
   name: "Advanced Camera Card",
   preview: false,
   description: "Smart camera switching card with manual override controls",
-  documentationURL: "https://github.com/YOUR_GITHUB_USERNAME/advanced-camera-card",
+  documentationURL: "https://github.com/petergCA/advanced-camera-card",
 });
