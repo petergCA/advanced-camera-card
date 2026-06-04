@@ -1,6 +1,6 @@
 {
   "name": "Advanced Camera Card",
-  "filename": "dist/advanced-camera-card.js",
-  "content_in_root": false,
+  "filename": "advanced-camera-card.js",
+  "content_in_root": true,
   "render_readme": true
 }
