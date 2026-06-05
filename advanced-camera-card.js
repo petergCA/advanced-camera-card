@@ -17,6 +17,8 @@ class AdvancedCameraCard extends HTMLElement {
     this._lingerCameraKey = null;
     this._lingerDone = new Set();
     this._lastOverlayKey = null;
+    this._templateSubs = {};
+    this._templateValues = {};
   }
 
   setConfig(config) {
@@ -57,6 +59,7 @@ class AdvancedCameraCard extends HTMLElement {
     this._muted = this._config.webrtc_defaults?.muted ?? true;
     this._cameraCards = {};
     this._preloadStarted = false;
+    this._clearTemplateSubs();
     this._renderBase();
     this._update();
   }
@@ -191,15 +194,9 @@ class AdvancedCameraCard extends HTMLElement {
         }
 
         .overlay-name {
-          display: block;
-          font-size: 0.72em;
-          opacity: 0.75;
-          line-height: 1.2;
         }
 
         .overlay-value {
-          display: block;
-          font-weight: 600;
         }
 
         .controls-bar {
@@ -648,7 +645,13 @@ class AdvancedCameraCard extends HTMLElement {
     }
 
     const displayValues = overlays.map((o) => {
-      if (o.template) return this._resolveTemplate(o.template);
+      if (o.template) {
+        if (o.template.includes("{%")) {
+          this._subscribeJinjaTemplate(o.template);
+          return this._templateValues[o.template] ?? "";
+        }
+        return this._resolveTemplate(o.template);
+      }
       if (!o.entity) return "";
       const es = this._hass?.states[o.entity];
       if (!es) return "";
@@ -683,18 +686,57 @@ class AdvancedCameraCard extends HTMLElement {
         const nameEl = document.createElement("span");
         nameEl.className = "overlay-name";
         nameEl.textContent = overlay.name;
+        if (overlay.name_size) nameEl.style.fontSize = `${overlay.name_size}px`;
         el.appendChild(nameEl);
+      }
+
+      if (display === "name_state" && overlay.name) {
+        el.appendChild(document.createTextNode(" "));
       }
 
       if (display === "name_state" || display === "state") {
         const valueEl = document.createElement("span");
         valueEl.className = "overlay-value";
         valueEl.textContent = value;
+        if (overlay.state_size) valueEl.style.fontSize = `${overlay.state_size}px`;
         el.appendChild(valueEl);
       }
 
       host.appendChild(el);
     }
+  }
+
+  _subscribeJinjaTemplate(template) {
+    if (template in this._templateSubs) return;
+    if (!this._hass?.connection) return;
+    this._templateSubs[template] = null;
+    this._hass.connection.subscribeMessage(
+      (msg) => {
+        const val = (msg.result ?? "").toString().trim();
+        if (this._templateValues[template] === val) return;
+        this._templateValues[template] = val;
+        this._lastOverlayKey = null;
+        const activeCamera = this._config?.cameras[this._activeCameraKey];
+        if (activeCamera) this._renderOverlays(activeCamera);
+      },
+      { type: "render_template", template }
+    ).then((unsub) => {
+      this._templateSubs[template] = unsub;
+    }).catch(() => {
+      delete this._templateSubs[template];
+    });
+  }
+
+  _clearTemplateSubs() {
+    for (const unsub of Object.values(this._templateSubs)) {
+      if (typeof unsub === "function") unsub();
+    }
+    this._templateSubs = {};
+    this._templateValues = {};
+  }
+
+  disconnectedCallback() {
+    this._clearTemplateSubs();
   }
 
   _resolveTemplate(template) {
