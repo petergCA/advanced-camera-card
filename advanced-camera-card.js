@@ -643,29 +643,29 @@ class AdvancedCameraCard extends HTMLElement {
     const overlays = camera?.overlays;
     if (!Array.isArray(overlays) || overlays.length === 0) {
       if (host.childElementCount > 0) host.innerHTML = "";
+      this._lastOverlayKey = null;
       return;
     }
 
-    const stateValues = overlays.map((o) => {
+    const displayValues = overlays.map((o) => {
+      if (o.template) return this._resolveTemplate(o.template);
       if (!o.entity) return "";
       const es = this._hass?.states[o.entity];
       if (!es) return "";
-      return o.attribute != null ? (es.attributes[o.attribute] ?? "") : es.state;
+      const raw = o.attribute != null ? (es.attributes[o.attribute] ?? es.state) : es.state;
+      return this._formatOverlayValue(raw, o.format);
     });
 
-    const renderKey = JSON.stringify({ overlays, stateValues });
+    const renderKey = JSON.stringify({ overlays, displayValues });
     if (renderKey === this._lastOverlayKey) return;
     this._lastOverlayKey = renderKey;
 
     host.innerHTML = "";
     for (let i = 0; i < overlays.length; i++) {
       const overlay = overlays[i];
-      if (!overlay.entity && !overlay.name) continue;
+      if (!overlay.entity && !overlay.name && !overlay.template) continue;
 
-      const es = overlay.entity ? this._hass?.states[overlay.entity] : null;
-      const value = es
-        ? (overlay.attribute != null ? (es.attributes[overlay.attribute] ?? es.state) : es.state)
-        : "";
+      const value = displayValues[i];
 
       const x = typeof overlay.x === "number" ? overlay.x : 50;
       const y = typeof overlay.y === "number" ? overlay.y : 50;
@@ -677,20 +677,52 @@ class AdvancedCameraCard extends HTMLElement {
       el.style.top = `${y}%`;
       el.style.fontSize = `${size}px`;
 
-      if (overlay.name) {
+      const display = overlay.display || (overlay.name ? "name_state" : "state");
+
+      if (overlay.name && (display === "name_state" || display === "name")) {
         const nameEl = document.createElement("span");
         nameEl.className = "overlay-name";
         nameEl.textContent = overlay.name;
         el.appendChild(nameEl);
       }
 
-      const valueEl = document.createElement("span");
-      valueEl.className = "overlay-value";
-      valueEl.textContent = value;
-      el.appendChild(valueEl);
+      if (display === "name_state" || display === "state") {
+        const valueEl = document.createElement("span");
+        valueEl.className = "overlay-value";
+        valueEl.textContent = value;
+        el.appendChild(valueEl);
+      }
 
       host.appendChild(el);
     }
+  }
+
+  _resolveTemplate(template) {
+    if (!template) return "";
+    return template.replace(/\{\{\s*(.*?)\s*\}\}/g, (match, expr) => {
+      expr = expr.trim();
+      const statesMatch = expr.match(/^states\(\s*['"]([^'"]+)['"]\s*\)$/);
+      if (statesMatch) return this._hass?.states[statesMatch[1]]?.state ?? "";
+      const attrMatch = expr.match(/^state_attr\(\s*['"]([^'"]+)['"],\s*['"]([^'"]+)['"]\s*\)$/);
+      if (attrMatch) return this._hass?.states[attrMatch[1]]?.attributes[attrMatch[2]] ?? "";
+      return match;
+    });
+  }
+
+  _formatOverlayValue(value, format) {
+    if (!format || value === "" || value == null) return value;
+    const num = Number(value);
+    if (Number.isNaN(num)) return value;
+    let totalMinutes;
+    if (format === "duration_minutes") totalMinutes = Math.round(num);
+    else if (format === "duration_seconds") totalMinutes = Math.round(num / 60);
+    else return value;
+    if (totalMinutes <= 0) return "0m";
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
   }
 
   _renderChips(activeKey) {
