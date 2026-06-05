@@ -164,6 +164,7 @@ class AdvancedCameraCard extends HTMLElement {
         .camera-wrap {
           position: relative;
           padding: 8px 10px 6px;
+          overflow: hidden;
         }
 
         .camera-wrap.compact {
@@ -172,6 +173,7 @@ class AdvancedCameraCard extends HTMLElement {
 
         .camera-host {
           overflow: hidden;
+          height: 100%;
         }
 
         .overlays-host {
