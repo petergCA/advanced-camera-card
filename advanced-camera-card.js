@@ -176,6 +176,12 @@ class AdvancedCameraCard extends HTMLElement {
           height: 100%;
         }
 
+        .camera-host > *,
+        .camera-host > * > * {
+          display: block;
+          height: 100%;
+        }
+
         .overlays-host {
           position: absolute;
           inset: 0;
@@ -533,13 +539,17 @@ class AdvancedCameraCard extends HTMLElement {
     host.innerHTML = "";
 
     const defaults = this._config.webrtc_defaults || {};
+    const baseStyle = camera.style || defaults.style || ".mode {display: none}";
+    const fitStyle = !camera.style && this._config.card_height
+      ? " video { height: 100%; max-height: 100%; width: 100%; object-fit: contain; }"
+      : "";
     const cardConfig = {
       type: camera.card_type || "custom:webrtc-camera",
       entity: camera.entity,
       muted: this._muted,
       mode: camera.mode || defaults.mode || "webrtc",
       ui: camera.ui ?? defaults.ui ?? false,
-      style: camera.style || defaults.style || ".mode {display: none}",
+      style: baseStyle + fitStyle,
       ...(camera.card_options || {}),
     };
 
@@ -610,13 +620,17 @@ class AdvancedCameraCard extends HTMLElement {
         const slot = host.querySelector(`[data-camera-key="${key}"]`);
         if (!slot) continue;
 
+        const baseStyle = camera.style || defaults.style || ".mode {display: none}";
+        const fitStyle = !camera.style && this._config.card_height
+          ? " video { height: 100%; max-height: 100%; width: 100%; object-fit: contain; }"
+          : "";
         const cardConfig = {
           type: camera.card_type || "custom:webrtc-camera",
           entity: camera.entity,
           muted: this._muted,
           mode: camera.mode || defaults.mode || "webrtc",
           ui: camera.ui ?? defaults.ui ?? false,
-          style: camera.style || defaults.style || ".mode {display: none}",
+          style: baseStyle + fitStyle,
           ...(camera.card_options || {}),
         };
 
