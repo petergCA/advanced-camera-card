@@ -19,6 +19,7 @@ The card wraps `custom:webrtc-camera` by default, but the child card type can be
 - Mute / unmute button for the active feed
 - Optional camera preloading so switching is instant
 - Fine-grained visibility controls for every header element
+- Per-camera overlays: display entity states, attributes, or Jinja2 templates as floating labels on the feed
 
 ---
 
@@ -122,6 +123,137 @@ webrtc_defaults:
 | `ui` | boolean | Show the WebRTC UI overlay. Overrides `webrtc_defaults.ui`. |
 | `style` | string | CSS injected into the child card. Overrides `webrtc_defaults.style`. |
 | `card_options` | object | Additional options merged into the child card config. Takes highest precedence. |
+| `overlays` | list | Floating labels rendered on top of the camera feed. See [Overlays](#overlays) below. |
+
+---
+
+## Overlays
+
+Each camera can have an `overlays` list — floating labels rendered on top of the feed at arbitrary positions. Useful for showing temperature, door state, occupancy counts, or any other entity value directly on the video.
+
+### Overlay options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `entity` | string | — | Home Assistant entity ID whose state is displayed. |
+| `attribute` | string | — | Read this attribute instead of `state`. Falls back to `state` if the attribute is missing. |
+| `name` | string | — | Optional label prefix shown before the value. |
+| `template` | string | — | Jinja2 template or simple `{{ }}` expression. Takes precedence over `entity`. |
+| `x` | number | `50` | Horizontal position as a percentage of the camera area (0 = left edge, 100 = right edge). |
+| `y` | number | `50` | Vertical position as a percentage of the camera area (0 = top edge, 100 = bottom edge). |
+| `size` | number | `14` | Font size in pixels applied to the whole label. |
+| `display` | string | `"name_state"` / `"state"` | Controls what is shown: `state` (value only), `name` (label only), or `name_state` (label + value). Defaults to `name_state` when `name` is set, otherwise `state`. |
+| `name_size` | number | — | Override font size for the label part only. |
+| `state_size` | number | — | Override font size for the value part only. |
+| `format` | string | — | Format the value before display. `duration_minutes` treats the value as minutes; `duration_seconds` treats it as seconds. Both render as `1h 30m` style strings. |
+
+### Positioning
+
+`x` and `y` are percentages relative to the camera area. The label is centred on the given point. Use `x: 5, y: 5` for top-left, `x: 95, y: 95` for bottom-right, and so on.
+
+### Template support
+
+Simple `{{ }}` expressions are resolved locally without a server round-trip:
+
+```yaml
+template: "{{ states('sensor.front_door_temp') }}°C"
+template: "{{ state_attr('climate.living_room', 'current_temperature') }}°"
+```
+
+Full Jinja2 templates (containing `{%` blocks or complex filters) are sent to Home Assistant via a WebSocket subscription and update automatically:
+
+```yaml
+template: "{% if is_state('binary_sensor.front_door', 'on') %}Open{% else %}Closed{% endif %}"
+```
+
+### Example
+
+![Advanced Camera Card with overlay showing Time Remaining on a 3D printer feed](images/example.png)
+
+*An overlay displaying print time remaining on a Bambu Lab printer camera. The card is in Auto mode, triggered by a printer-active sensor.*
+
+### More examples
+
+**Single entity value:**
+
+```yaml
+cameras:
+  driveway:
+    name: Driveway
+    entity: camera.driveway
+    overlays:
+      - entity: sensor.driveway_temperature
+        name: Temp
+        x: 5
+        y: 90
+        size: 13
+```
+
+**Multiple overlays — temperature and occupancy count:**
+
+```yaml
+cameras:
+  backyard:
+    name: Backyard
+    entity: camera.backyard
+    overlays:
+      - entity: sensor.backyard_temperature
+        name: "Temp:"
+        x: 5
+        y: 90
+        size: 12
+      - entity: sensor.backyard_person_count
+        name: "People:"
+        x: 5
+        y: 80
+        size: 12
+```
+
+**Attribute value — show a thermostat's set-point:**
+
+```yaml
+overlays:
+  - entity: climate.living_room
+    attribute: temperature
+    name: "Set:"
+    x: 10
+    y: 10
+    size: 13
+```
+
+**Duration format — show time since last motion as h/m:**
+
+```yaml
+overlays:
+  - entity: sensor.front_door_last_motion_seconds
+    format: duration_seconds
+    name: "Last motion:"
+    x: 5
+    y: 92
+    size: 12
+```
+
+**Conditional label via Jinja2 template:**
+
+```yaml
+overlays:
+  - template: "{% if is_state('binary_sensor.garage_door', 'on') %}OPEN{% else %}CLOSED{% endif %}"
+    name: "Garage:"
+    x: 50
+    y: 5
+    size: 14
+```
+
+**Value only (no name prefix):**
+
+```yaml
+overlays:
+  - entity: sensor.driveway_vehicle_count
+    display: state
+    x: 95
+    y: 5
+    size: 16
+```
 
 ---
 
