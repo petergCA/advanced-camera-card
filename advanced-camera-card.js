@@ -194,9 +194,15 @@ class AdvancedCameraCard extends HTMLElement {
         }
 
         .overlay-name {
+          display: inline;
+          font-size: inherit;
+          color: #fff;
         }
 
         .overlay-value {
+          display: inline;
+          font-size: inherit;
+          color: #fff;
         }
 
         .controls-bar {
@@ -646,7 +652,7 @@ class AdvancedCameraCard extends HTMLElement {
 
     const displayValues = overlays.map((o) => {
       if (o.template) {
-        if (o.template.includes("{%")) {
+        if (o.template.includes("{%") || o.template.includes("{{")) {
           this._subscribeJinjaTemplate(o.template);
           return this._templateValues[o.template] ?? "";
         }
