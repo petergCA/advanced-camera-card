@@ -16,6 +16,7 @@ class AdvancedCameraCard extends HTMLElement {
     this._lingerTimer = null;
     this._lingerCameraKey = null;
     this._lingerDone = new Set();
+    this._lastOverlayKey = null;
   }
 
   setConfig(config) {
@@ -157,13 +158,48 @@ class AdvancedCameraCard extends HTMLElement {
           white-space: nowrap;
         }
 
-        .camera-host {
+        .camera-wrap {
+          position: relative;
           padding: 8px 10px 6px;
+        }
+
+        .camera-wrap.compact {
+          padding: 6px 8px 4px;
+        }
+
+        .camera-host {
           overflow: hidden;
         }
 
-        .camera-host.compact {
-          padding: 6px 8px 4px;
+        .overlays-host {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          overflow: hidden;
+        }
+
+        .entity-overlay {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          background: rgba(0, 0, 0, 0.55);
+          color: #fff;
+          padding: 4px 8px;
+          border-radius: 6px;
+          line-height: 1.4;
+          white-space: nowrap;
+          text-align: center;
+        }
+
+        .overlay-name {
+          display: block;
+          font-size: 0.72em;
+          opacity: 0.75;
+          line-height: 1.2;
+        }
+
+        .overlay-value {
+          display: block;
+          font-weight: 600;
         }
 
         .controls-bar {
@@ -240,7 +276,10 @@ class AdvancedCameraCard extends HTMLElement {
           </div>
           <div class="mode-pill"></div>
         </div>
-        <div class="camera-host"></div>
+        <div class="camera-wrap">
+          <div class="camera-host"></div>
+          <div class="overlays-host"></div>
+        </div>
         <div class="controls-bar">
           <div class="chips"></div>
           <div class="mute-wrap">
@@ -285,12 +324,13 @@ class AdvancedCameraCard extends HTMLElement {
     const modePill = this.shadowRoot.querySelector(".mode-pill");
     modePill.textContent = this._manualCamera ? "Manual" : "Auto";
     modePill.style.display = this._config.show_mode_pill === false ? "none" : "";
-    const cameraHost = this.shadowRoot.querySelector(".camera-host");
-    cameraHost.classList.toggle("compact", !!this._config.compact);
-    cameraHost.style.height = this._config.card_height ? `${this._config.card_height}px` : "";
+    const cameraWrap = this.shadowRoot.querySelector(".camera-wrap");
+    cameraWrap.classList.toggle("compact", !!this._config.compact);
+    cameraWrap.style.height = this._config.card_height ? `${this._config.card_height}px` : "";
     this.shadowRoot.querySelector(".controls-bar").classList.toggle("hidden", this._config.show_controls === false);
 
     await this._renderCamera(activeKey, activeCamera);
+    this._renderOverlays(activeCamera);
     this._renderChips(activeKey);
     this._updateMuteButton();
   }
@@ -593,6 +633,63 @@ class AdvancedCameraCard extends HTMLElement {
       }
     } catch (err) {
       console.warn("advanced-camera-card: preload init failed:", err);
+    }
+  }
+
+  _renderOverlays(camera) {
+    const host = this.shadowRoot?.querySelector(".overlays-host");
+    if (!host) return;
+
+    const overlays = camera?.overlays;
+    if (!Array.isArray(overlays) || overlays.length === 0) {
+      if (host.childElementCount > 0) host.innerHTML = "";
+      return;
+    }
+
+    const stateValues = overlays.map((o) => {
+      if (!o.entity) return "";
+      const es = this._hass?.states[o.entity];
+      if (!es) return "";
+      return o.attribute != null ? (es.attributes[o.attribute] ?? "") : es.state;
+    });
+
+    const renderKey = JSON.stringify({ overlays, stateValues });
+    if (renderKey === this._lastOverlayKey) return;
+    this._lastOverlayKey = renderKey;
+
+    host.innerHTML = "";
+    for (let i = 0; i < overlays.length; i++) {
+      const overlay = overlays[i];
+      if (!overlay.entity && !overlay.name) continue;
+
+      const es = overlay.entity ? this._hass?.states[overlay.entity] : null;
+      const value = es
+        ? (overlay.attribute != null ? (es.attributes[overlay.attribute] ?? es.state) : es.state)
+        : "";
+
+      const x = typeof overlay.x === "number" ? overlay.x : 50;
+      const y = typeof overlay.y === "number" ? overlay.y : 50;
+      const size = typeof overlay.size === "number" ? overlay.size : 14;
+
+      const el = document.createElement("div");
+      el.className = "entity-overlay";
+      el.style.left = `${x}%`;
+      el.style.top = `${y}%`;
+      el.style.fontSize = `${size}px`;
+
+      if (overlay.name) {
+        const nameEl = document.createElement("span");
+        nameEl.className = "overlay-name";
+        nameEl.textContent = overlay.name;
+        el.appendChild(nameEl);
+      }
+
+      const valueEl = document.createElement("span");
+      valueEl.className = "overlay-value";
+      valueEl.textContent = value;
+      el.appendChild(valueEl);
+
+      host.appendChild(el);
     }
   }
 
