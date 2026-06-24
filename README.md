@@ -80,6 +80,7 @@ Entity-based conditions (motion sensors, alarm state, door contacts, etc.) are e
 | `default_linger_seconds` | number | `0` | Seconds any triggered camera stays on screen after its condition clears. Applied to cameras without their own `linger_seconds`. |
 | `preload_cameras` | boolean | `false` | Load all camera cards at startup so switching is instant. Uses more memory. |
 | `card_height` | number | — | Fix the camera area to this pixel height. Useful when cameras have different aspect ratios. |
+| `video_fit` | string | `contain` | How the video fills the box when `card_height` is set: `contain` (letterbox, no cropping), `cover` (fill the box, crops edges), or `fill` (stretch). Can be overridden per camera. |
 | `compact` | boolean | `false` | Slightly reduced padding and grid height. |
 | `webrtc_defaults` | object | see below | Default options passed to the child card for every camera. |
 | `cameras` | object | **required** | Camera definitions, keyed by a unique string ID. |
@@ -122,6 +123,7 @@ webrtc_defaults:
 | `mode` | string | WebRTC stream mode for this camera. Overrides `webrtc_defaults.mode`. |
 | `ui` | boolean | Show the WebRTC UI overlay. Overrides `webrtc_defaults.ui`. |
 | `style` | string | CSS injected into the child card. Overrides `webrtc_defaults.style`. |
+| `video_fit` | string | How the video fills the box (`contain`, `cover`, `fill`). Overrides the top-level `video_fit`. Requires `card_height`. |
 | `card_options` | object | Additional options merged into the child card config. Takes highest precedence. |
 | `overlays` | list | Floating labels rendered on top of the camera feed. See [Overlays](#overlays) below. |
 

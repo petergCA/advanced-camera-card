@@ -43,6 +43,7 @@ class AdvancedCameraCard extends HTMLElement {
       compact: false,
       preload_cameras: false,
       card_height: null,
+      video_fit: "contain",
       webrtc_defaults: {
         muted: true,
         mode: "webrtc",
@@ -540,8 +541,9 @@ class AdvancedCameraCard extends HTMLElement {
 
     const defaults = this._config.webrtc_defaults || {};
     const baseStyle = camera.style || defaults.style || ".mode {display: none}";
+    const fit = camera.video_fit || this._config.video_fit || "contain";
     const fitStyle = !camera.style && this._config.card_height
-      ? " video { height: 100%; max-height: 100%; width: 100%; object-fit: contain; }"
+      ? ` video { height: 100%; max-height: 100%; width: 100%; object-fit: ${fit}; }`
       : "";
     const cardConfig = {
       type: camera.card_type || "custom:webrtc-camera",
@@ -621,8 +623,9 @@ class AdvancedCameraCard extends HTMLElement {
         if (!slot) continue;
 
         const baseStyle = camera.style || defaults.style || ".mode {display: none}";
+        const fit = camera.video_fit || this._config.video_fit || "contain";
         const fitStyle = !camera.style && this._config.card_height
-          ? " video { height: 100%; max-height: 100%; width: 100%; object-fit: contain; }"
+          ? ` video { height: 100%; max-height: 100%; width: 100%; object-fit: ${fit}; }`
           : "";
         const cardConfig = {
           type: camera.card_type || "custom:webrtc-camera",
