@@ -19,6 +19,10 @@ class AdvancedCameraCard extends HTMLElement {
     this._lastOverlayKey = null;
     this._templateSubs = {};
     this._templateValues = {};
+    this._pipCard = null;
+    this._pipRenderKey = null;
+    this._pipRenderingKey = null;
+    this._pipEnabled = true;
   }
 
   setConfig(config) {
@@ -60,6 +64,10 @@ class AdvancedCameraCard extends HTMLElement {
     this._muted = this._config.webrtc_defaults?.muted ?? true;
     this._cameraCards = {};
     this._preloadStarted = false;
+    this._pipCard = null;
+    this._pipRenderKey = null;
+    this._pipRenderingKey = null;
+    this._pipEnabled = this._config.pip?.default_enabled ?? true;
     this._clearTemplateSubs();
     this._renderBase();
     this._update();
@@ -190,6 +198,26 @@ class AdvancedCameraCard extends HTMLElement {
           overflow: hidden;
         }
 
+        .pip-host {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          width: 20%;
+          aspect-ratio: 16 / 9;
+          pointer-events: none;
+          overflow: hidden;
+          border-radius: 8px;
+          border: 1px solid rgba(255, 255, 255, 0.35);
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+          background: #000;
+          z-index: 2;
+        }
+
+        .pip-host > *,
+        .pip-host > * > * {
+          display: block;
+          height: 100%;
+        }
+
         .entity-overlay {
           position: absolute;
           transform: translate(-50%, -50%);
@@ -273,6 +301,38 @@ class AdvancedCameraCard extends HTMLElement {
           --mdc-icon-size: 17px;
         }
 
+        button.pip-btn {
+          border: 0;
+          outline: 0;
+          cursor: pointer;
+          display: none;
+          align-items: center;
+          justify-content: center;
+          padding: 4px 8px;
+          border-radius: 999px;
+          color: var(--secondary-text-color);
+          background: rgba(255, 255, 255, 0.06);
+          transition: background 120ms ease;
+          flex-shrink: 0;
+        }
+
+        button.pip-btn.visible {
+          display: inline-flex;
+        }
+
+        button.pip-btn:hover {
+          background: rgba(var(--rgb-primary-color), 0.16);
+        }
+
+        button.pip-btn.active {
+          background: rgba(var(--rgb-primary-color), 0.28);
+          color: var(--primary-color);
+        }
+
+        button.pip-btn ha-icon {
+          --mdc-icon-size: 17px;
+        }
+
         .empty {
           padding: 16px;
           color: var(--secondary-text-color);
@@ -286,10 +346,14 @@ class AdvancedCameraCard extends HTMLElement {
             <div class="title"></div>
             <div class="reason"></div>
           </div>
+          <button class="pip-btn" type="button" aria-label="Toggle picture-in-picture">
+            <ha-icon icon="mdi:picture-in-picture-top-right"></ha-icon>
+          </button>
           <div class="mode-pill"></div>
         </div>
         <div class="camera-wrap">
           <div class="camera-host"></div>
+          <div class="pip-host" style="display: none"></div>
           <div class="overlays-host"></div>
         </div>
         <div class="controls-bar">
@@ -304,6 +368,7 @@ class AdvancedCameraCard extends HTMLElement {
     `;
 
     this.shadowRoot.querySelector(".mute-btn").addEventListener("click", () => this._toggleMute());
+    this.shadowRoot.querySelector(".pip-btn").addEventListener("click", () => this._togglePip());
   }
 
   async _update() {
@@ -342,9 +407,119 @@ class AdvancedCameraCard extends HTMLElement {
     this.shadowRoot.querySelector(".controls-bar").classList.toggle("hidden", this._config.show_controls === false);
 
     await this._renderCamera(activeKey, activeCamera);
+    await this._renderPip(activeKey, activeCamera);
     this._renderOverlays(activeCamera);
     this._renderChips(activeKey);
     this._updateMuteButton();
+    this._updatePipButton(activeCamera);
+  }
+
+  _resolvePipConfig(activeCamera) {
+    // Per-camera pip overrides the card-level pip; pip: false on a camera disables it there
+    const pip = activeCamera && activeCamera.pip !== undefined ? activeCamera.pip : this._config.pip;
+    if (!pip || typeof pip !== "object") return null;
+    return pip;
+  }
+
+  _resolvePipCamera(pip) {
+    if (!pip) return null;
+    if (pip.camera && this._config.cameras[pip.camera]) {
+      return { key: pip.camera, camera: this._config.cameras[pip.camera] };
+    }
+    if (pip.entity) {
+      return { key: `pip:${pip.entity}`, camera: pip };
+    }
+    return null;
+  }
+
+  async _renderPip(activeKey, activeCamera) {
+    const host = this.shadowRoot?.querySelector(".pip-host");
+    if (!host) return;
+
+    const pip = this._resolvePipConfig(activeCamera);
+    const resolved = this._resolvePipCamera(pip);
+
+    // Hide when unconfigured, toggled off, or the pip camera is already the main feed
+    const hidden =
+      !resolved ||
+      !this._pipEnabled ||
+      resolved.key === activeKey ||
+      (resolved.camera.entity && resolved.camera.entity === activeCamera?.entity);
+
+    if (hidden) {
+      host.style.display = "none";
+      return;
+    }
+
+    const x = typeof pip.x === "number" ? pip.x : 82;
+    const y = typeof pip.y === "number" ? pip.y : 18;
+    const size = typeof pip.size === "number" ? pip.size : 20;
+
+    host.style.display = "";
+    host.style.left = `${x}%`;
+    host.style.top = `${y}%`;
+    host.style.width = `${size}%`;
+    if (pip.aspect_ratio) {
+      host.style.aspectRatio = String(pip.aspect_ratio).replace(":", " / ");
+    }
+
+    const renderKey = resolved.key;
+    if (this._pipCard && this._pipRenderKey === renderKey) {
+      this._pipCard.hass = this._hass;
+      return;
+    }
+
+    if (this._pipRenderingKey === renderKey) return;
+    this._pipRenderingKey = renderKey;
+
+    this._pipRenderKey = renderKey;
+    this._pipCard = null;
+    host.innerHTML = "";
+
+    const defaults = this._config.webrtc_defaults || {};
+    const camera = resolved.camera;
+    const fit = pip.video_fit || "cover";
+    const cardConfig = {
+      type: camera.card_type || "custom:webrtc-camera",
+      entity: camera.entity,
+      muted: true,
+      mode: camera.mode || defaults.mode || "webrtc",
+      ui: false,
+      style: `.mode {display: none} video { width: 100%; height: 100%; object-fit: ${fit}; }`,
+      ...(camera.card_options || {}),
+    };
+
+    try {
+      const helpers = await window.loadCardHelpers();
+      if (this._pipRenderingKey !== renderKey) return;
+      const card = await helpers.createCardElement(cardConfig);
+      if (this._pipRenderingKey !== renderKey) return;
+      card.hass = this._hass;
+      this._pipCard = card;
+      host.appendChild(card);
+    } catch (err) {
+      console.warn("advanced-camera-card: failed to load pip camera:", err);
+      host.style.display = "none";
+    } finally {
+      if (this._pipRenderingKey === renderKey) this._pipRenderingKey = null;
+    }
+  }
+
+  _updatePipButton(activeCamera) {
+    const btn = this.shadowRoot?.querySelector(".pip-btn");
+    if (!btn) return;
+    const configured = !!this._resolvePipCamera(this._resolvePipConfig(activeCamera));
+    btn.classList.toggle("visible", configured);
+    btn.classList.toggle("active", configured && this._pipEnabled);
+    btn.querySelector("ha-icon")?.setAttribute(
+      "icon",
+      this._pipEnabled ? "mdi:picture-in-picture-top-right" : "mdi:picture-in-picture-top-right-outline"
+    );
+  }
+
+  _togglePip() {
+    this._pipEnabled = !this._pipEnabled;
+    this._update();
   }
 
   _clearLinger() {

@@ -20,6 +20,7 @@ The card wraps `custom:webrtc-camera` by default, but the child card type can be
 - Optional camera preloading so switching is instant
 - Fine-grained visibility controls for every header element
 - Per-camera overlays: display entity states, attributes, or Jinja2 templates as floating labels on the feed
+- Picture-in-picture: overlay a second live camera feed on top of the main feed, freely positioned and sized, with a header toggle
 
 ---
 
@@ -83,6 +84,7 @@ Entity-based conditions (motion sensors, alarm state, door contacts, etc.) are e
 | `video_fit` | string | `contain` | How the video fills the box when `card_height` is set: `contain` (letterbox, no cropping), `cover` (fill the box, crops edges), or `fill` (stretch). Can be overridden per camera. |
 | `compact` | boolean | `false` | Slightly reduced padding and grid height. |
 | `webrtc_defaults` | object | see below | Default options passed to the child card for every camera. |
+| `pip` | object | — | Picture-in-picture overlay feed. See [Picture-in-picture](#picture-in-picture) below. |
 | `cameras` | object | **required** | Camera definitions, keyed by a unique string ID. |
 
 ### Visibility options
@@ -126,6 +128,7 @@ webrtc_defaults:
 | `video_fit` | string | How the video fills the box (`contain`, `cover`, `fill`). Overrides the top-level `video_fit`. Requires `card_height`. |
 | `card_options` | object | Additional options merged into the child card config. Takes highest precedence. |
 | `overlays` | list | Floating labels rendered on top of the camera feed. See [Overlays](#overlays) below. |
+| `pip` | object or `false` | Per-camera picture-in-picture override. Replaces the card-level `pip` while this camera is active; set to `false` to disable PIP on this camera. |
 
 ---
 
@@ -256,6 +259,53 @@ overlays:
     y: 5
     size: 16
 ```
+
+---
+
+## Picture-in-picture
+
+Overlay a second live camera feed on top of the main feed — for example the porch camera floating over the driveway camera. The PIP feed uses the same child-card pipeline as the main feed (live WebRTC, not snapshots) and is always muted so it never competes with the main feed's audio.
+
+When a `pip` block is configured, a picture-in-picture toggle button appears in the card header. PIP is **on by default**; tap the button to hide or restore the overlay. The overlay also hides itself automatically whenever the main feed switches to the same camera as the PIP, so you never see a camera overlaid on itself.
+
+### PIP options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `camera` | string | — | Key of a camera defined in `cameras` to show in the overlay. Preferred — reuses that camera's entity, mode, and card options. |
+| `entity` | string | — | Camera entity ID, as an alternative to `camera` for a feed not defined in `cameras`. |
+| `x` | number | `82` | Horizontal position of the overlay's **center**, as a percentage of the camera area (same convention as overlays). |
+| `y` | number | `18` | Vertical position of the overlay's center, as a percentage. |
+| `size` | number | `20` | Overlay width as a percentage of the main camera area. |
+| `aspect_ratio` | string | `16:9` | Aspect ratio of the overlay box, e.g. `"4:3"`. |
+| `video_fit` | string | `cover` | How the PIP video fills its box: `cover`, `contain`, or `fill`. |
+| `default_enabled` | boolean | `true` | Initial state of the header PIP toggle. |
+
+### Example
+
+Porch camera floating in the top-right corner of the driveway feed:
+
+```yaml
+type: custom:advanced-camera-card
+title: Driveway
+default_camera: driveway
+pip:
+  camera: porch
+  x: 82
+  y: 18
+  size: 20
+cameras:
+  driveway:
+    name: Driveway
+    entity: camera.driveway
+  porch:
+    name: Porch
+    entity: camera.porch
+```
+
+The defaults put the overlay in the top-right corner at 20% of the main feed's width. Position uses the same x/y percentage system as [Overlays](#overlays): `x: 50, y: 50` centers it, `x: 18, y: 82` puts it bottom-left. Because `x`/`y` anchor the overlay's center, keep them roughly `size / 2` away from the edges to avoid clipping.
+
+A per-camera `pip` block overrides the card-level one while that camera is active — useful if you want a different PIP feed (or none, via `pip: false`) on a particular camera.
 
 ---
 
