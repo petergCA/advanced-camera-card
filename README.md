@@ -307,13 +307,14 @@ The defaults put the overlay in the top-right corner at 20% of the main feed's w
 
 ### Per-camera overrides
 
-A per-camera `pip` block is merged over the card-level one while that camera is active, so you only need to specify the fields you want to change. Set `pip: false` on a camera to disable PIP entirely while it's showing.
+A per-camera `pip` block is merged over the card-level one while that camera is active *(v0.2.1+)*, so you only need to specify the fields you want to change — everything else (the feed, `size`, `aspect_ratio`, `video_fit`) is inherited. The most common use is keeping the same PIP feed everywhere but repositioning it per view. Set `pip: false` on a camera to disable PIP entirely while it's showing.
 
 ```yaml
 pip:
-  camera: front_porch
+  camera: front_porch     # the feed, size, etc. defined once
   x: 88
   y: 84
+  size: 20
 cameras:
   bedroom:
     entity: camera.bedroom
@@ -321,12 +322,20 @@ cameras:
   play_room:
     entity: camera.play_room
     pip:
-      x: 12               # PIP moves to the bottom-left on this feed
+      x: 12               # same porch feed, moved to the bottom-left here
   back_yard:
     entity: camera.back_yard
     pip:
       camera: driveway    # different PIP feed on this camera
+  driveway:
+    entity: camera.driveway
+    # no pip block → inherits the card-level position unchanged
 ```
+
+Tips:
+
+- On a stacked view (e.g. a `horizontal-stack` camera showing two feeds side by side), x/y are still relative to the whole camera area — `x: 15` / `x: 85` roughly centers the PIP over the left or right feed, while `x: 50` straddles the seam.
+- On **v0.2.0** a per-camera `pip` block *replaced* the card-level one, so it had to repeat `camera:` and `size:`. Those full blocks still work unchanged on v0.2.1+.
 
 ---
 
