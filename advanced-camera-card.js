@@ -415,10 +415,13 @@ class AdvancedCameraCard extends HTMLElement {
   }
 
   _resolvePipConfig(activeCamera) {
-    // Per-camera pip overrides the card-level pip; pip: false on a camera disables it there
-    const pip = activeCamera && activeCamera.pip !== undefined ? activeCamera.pip : this._config.pip;
-    if (!pip || typeof pip !== "object") return null;
-    return pip;
+    // pip: false on a camera disables PIP there; a per-camera pip object is
+    // merged over the card-level pip so single fields (e.g. x/y) can be overridden
+    const cardPip = this._config.pip && typeof this._config.pip === "object" ? this._config.pip : null;
+    const camPip = activeCamera?.pip;
+    if (camPip === undefined) return cardPip;
+    if (!camPip || typeof camPip !== "object") return null;
+    return cardPip ? { ...cardPip, ...camPip } : camPip;
   }
 
   _resolvePipCamera(pip) {

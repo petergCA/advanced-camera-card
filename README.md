@@ -128,7 +128,7 @@ webrtc_defaults:
 | `video_fit` | string | How the video fills the box (`contain`, `cover`, `fill`). Overrides the top-level `video_fit`. Requires `card_height`. |
 | `card_options` | object | Additional options merged into the child card config. Takes highest precedence. |
 | `overlays` | list | Floating labels rendered on top of the camera feed. See [Overlays](#overlays) below. |
-| `pip` | object or `false` | Per-camera picture-in-picture override. Replaces the card-level `pip` while this camera is active; set to `false` to disable PIP on this camera. |
+| `pip` | object or `false` | Per-camera picture-in-picture override, merged over the card-level `pip` while this camera is active — set only the fields you want to change (e.g. just `x`/`y` to reposition). Set to `false` to disable PIP on this camera. |
 
 ---
 
@@ -305,7 +305,28 @@ cameras:
 
 The defaults put the overlay in the top-right corner at 20% of the main feed's width. Position uses the same x/y percentage system as [Overlays](#overlays): `x: 50, y: 50` centers it, `x: 18, y: 82` puts it bottom-left. Because `x`/`y` anchor the overlay's center, keep them roughly `size / 2` away from the edges to avoid clipping.
 
-A per-camera `pip` block overrides the card-level one while that camera is active — useful if you want a different PIP feed (or none, via `pip: false`) on a particular camera.
+### Per-camera overrides
+
+A per-camera `pip` block is merged over the card-level one while that camera is active, so you only need to specify the fields you want to change. Set `pip: false` on a camera to disable PIP entirely while it's showing.
+
+```yaml
+pip:
+  camera: front_porch
+  x: 88
+  y: 84
+cameras:
+  bedroom:
+    entity: camera.bedroom
+    pip: false            # no PIP over this feed
+  play_room:
+    entity: camera.play_room
+    pip:
+      x: 12               # PIP moves to the bottom-left on this feed
+  back_yard:
+    entity: camera.back_yard
+    pip:
+      camera: driveway    # different PIP feed on this camera
+```
 
 ---
 
