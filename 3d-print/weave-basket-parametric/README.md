@@ -39,8 +39,12 @@ python3 weave_basket_param.py --width 170 --length 110 --height 60 -o big_basket
   `--resolution` (sweep step, default 0.35 mm; use 0.5 for smaller files)
   are also available.
 
-Outputs a watertight STL + 3MF. Print like the original: no supports, the
-rope overhangs are self-supporting at this scale.
+Outputs a watertight STL + a **Bambu Studio project 3MF** (full Metadata/
+config package, so it opens without the "invalid config, load geometry data
+only" dialog). Pass `--template /path/to/WeaveBasketv3.3mf` to carry the
+original designer's tuned print profile into the output project. Print like
+the original: no supports, the rope overhangs are self-supporting at this
+scale.
 
 `size_comparison.png` shows 120x80x41 next to 170x110x62 — same rope, more
 weave.

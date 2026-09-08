@@ -207,6 +207,141 @@ def build_basket(width, length, height, corner_r=CORNER_R_DEFAULT,
     return basket
 
 
+# ------------------------- Bambu Studio project export -------------------------
+def export_bambu_project_3mf(mesh, path, name="Weave Basket", template_3mf=None):
+    """Write a Bambu Studio project 3MF (loads without the "invalid config,
+    load geometry data only" dialog).
+
+    Bambu treats a 3MF as a project only when its Metadata/ config files are
+    present and consistent with the geometry, so this writes the full package:
+    geometry in 3D/Objects/object_1.model, an assembly in 3D/3dmodel.model,
+    and a matching model_settings.config. If template_3mf points to the
+    original WeaveBasketv3.3mf, its print profile (project_settings.config)
+    is carried over so the designer's tuned settings load too.
+    """
+    import io
+    import uuid
+    import zipfile
+
+    V = np.asarray(mesh.vertices, dtype=np.float64)
+    F = np.asarray(mesh.faces, dtype=np.int64)
+    nsxml = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+             'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" '
+             'requiredextensions="p"')
+
+    buf = io.StringIO()
+    buf.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+    buf.write(f'<model unit="millimeter" xml:lang="en-US" {nsxml}>\n')
+    buf.write(' <metadata name="BambuStudio:3mfVersion">1</metadata>\n')
+    buf.write(f' <resources>\n  <object id="1" p:UUID="{uuid.uuid4()}" type="model">\n'
+              '   <mesh>\n    <vertices>\n')
+    for x, y, z in V:
+        buf.write(f'     <vertex x="{x:.9g}" y="{y:.9g}" z="{z:.9g}"/>\n')
+    buf.write('    </vertices>\n    <triangles>\n')
+    for a, b, c in F:
+        buf.write(f'     <triangle v1="{a}" v2="{b}" v3="{c}"/>\n')
+    buf.write('    </triangles>\n   </mesh>\n  </object>\n </resources>\n</model>\n')
+    object_xml = buf.getvalue()
+
+    ident = "1 0 0 0 1 0 0 0 1 0 0 0"
+    root_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" {nsxml} xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">
+ <metadata name="Application">BambuStudio-02.04.00.70</metadata>
+ <metadata name="BambuStudio:3mfVersion">1</metadata>
+ <metadata name="Title">{name}</metadata>
+ <resources>
+  <object id="2" p:UUID="{uuid.uuid4()}" type="model">
+   <components>
+    <component p:path="/3D/Objects/object_1.model" objectid="1" p:UUID="{uuid.uuid4()}" transform="{ident}" />
+   </components>
+  </object>
+ </resources>
+ <build p:UUID="{uuid.uuid4()}">
+  <item objectid="2" p:UUID="{uuid.uuid4()}" transform="1 0 0 0 1 0 0 0 1 128 128 0" printable="1" />
+ </build>
+</model>
+'''
+    model_settings = f'''<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="2">
+    <metadata key="name" value="{name}"/>
+    <metadata key="extruder" value="1"/>
+    <metadata face_count="{len(F)}"/>
+    <part id="1" subtype="normal_part">
+      <metadata key="name" value="Basket"/>
+      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+      <metadata key="extruder" value="1"/>
+      <mesh_stat face_count="{len(F)}" edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
+    </part>
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+    <model_instance>
+      <metadata key="object_id" value="2"/>
+      <metadata key="instance_id" value="0"/>
+      <metadata key="identify_id" value="84"/>
+    </model_instance>
+  </plate>
+  <assemble>
+   <assemble_item object_id="2" instance_id="0" transform="{ident}" offset="0 0 0" />
+  </assemble>
+</config>
+'''
+    content_types = '''<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+ <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+ <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+ <Default Extension="png" ContentType="image/png"/>
+</Types>'''
+    rels = '''<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
+</Relationships>'''
+    obj_rels = '''<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/Objects/object_1.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>'''
+    slice_info = '''<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <header>
+    <header_item key="X-BBL-Client-Type" value="slicer"/>
+    <header_item key="X-BBL-Client-Version" value="02.04.00.70"/>
+  </header>
+</config>'''
+    cut_info = '''<?xml version="1.0" encoding="utf-8"?>
+<objects>
+ <object id="2">
+  <cut_id id="0" check_sum="1" connectors_cnt="0"/>
+ </object>
+</objects>'''
+
+    project_settings = None
+    if template_3mf and os.path.exists(template_3mf):
+        try:
+            with zipfile.ZipFile(template_3mf) as z:
+                project_settings = z.read("Metadata/project_settings.config")
+            print(f"carrying print profile over from {os.path.basename(template_3mf)}")
+        except KeyError:
+            print("template has no project_settings.config; writing without profile")
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types)
+        z.writestr("_rels/.rels", rels)
+        z.writestr("3D/3dmodel.model", root_xml)
+        z.writestr("3D/_rels/3dmodel.model.rels", obj_rels)
+        z.writestr("3D/Objects/object_1.model", object_xml)
+        z.writestr("Metadata/model_settings.config", model_settings)
+        z.writestr("Metadata/slice_info.config", slice_info)
+        z.writestr("Metadata/cut_information.xml", cut_info)
+        z.writestr("Metadata/filament_sequence.json", '{"plate_1":{"sequence":[]}}')
+        if project_settings is not None:
+            z.writestr("Metadata/project_settings.config", project_settings)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--width", type=float, default=120.0,
@@ -222,6 +357,9 @@ def main():
                     help="sweep step along the rope, mm")
     ap.add_argument("-o", "--output", default="weave_basket",
                     help="output file basename")
+    ap.add_argument("--template", default=None,
+                    help="path to the original WeaveBasketv3.3mf; its Bambu "
+                         "print profile is embedded in the output 3MF")
     args = ap.parse_args()
 
     basket = build_basket(args.width, args.length, args.height,
@@ -231,7 +369,8 @@ def main():
     stl = os.path.join(out, args.output + ".stl")
     tmf = os.path.join(out, args.output + ".3mf")
     basket.export(stl)
-    trimesh.Scene({args.output: basket}).export(tmf)
+    export_bambu_project_3mf(basket, tmf, name=args.output,
+                             template_3mf=args.template)
     print("wrote", stl, "and", tmf)
 
 
