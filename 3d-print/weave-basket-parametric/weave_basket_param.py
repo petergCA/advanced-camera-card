@@ -166,8 +166,14 @@ def base_slab(W, L, R, thickness, seg=48):
 
 
 # --------------------------------- assembly -----------------------------------
-def build_basket(width, length, height, corner_r=CORNER_R_DEFAULT,
-                 strand_r=STRAND_R, ply_e=PLY_OFFSET, ds=0.35, nphi=18):
+def build_parts(width, length, height, corner_r=CORNER_R_DEFAULT,
+                strand_r=STRAND_R, ply_e=PLY_OFFSET, ds=0.35, nphi=18):
+    """Build the unique meshes plus their placements (no union).
+
+    Returns a dict: named unique meshes and lists of z offsets where the two
+    row types repeat. Row meshes are centered on z=0; base/starter sit at
+    their absolute position.
+    """
     corner_r = min(corner_r, width / 2 - 1, length / 2 - 1)
     n_pairs = max(1, round((height - ROW0_Z - strand_r - PLY_OFFSET) / PAIR_PITCH))
     top_a_z = ROW0_Z + n_pairs * PAIR_PITCH
@@ -180,7 +186,7 @@ def build_basket(width, length, height, corner_r=CORNER_R_DEFAULT,
     print(f"twist: {n_half} half-turns, pitch {P / n_half:.3f} mm "
           f"(original {HALF_TWIST})")
 
-    parts = [base_slab(width, length, corner_r, BASE_T)]
+    base = base_slab(width, length, corner_r, BASE_T)
 
     # foot/starter ring, trimmed flush to the base slab band
     foot = rope_row(width, length, corner_r, FOOT_Z, -1, TWIST_B_PHASE,
@@ -188,137 +194,87 @@ def build_basket(width, length, height, corner_r=CORNER_R_DEFAULT,
     big = max(width, length) + 20
     band = trimesh.creation.box(extents=(big, big, BASE_T))
     band.apply_translation((0, 0, BASE_T / 2))
-    foot = [trimesh.boolean.intersection([f, band], engine="manifold")
-            for f in foot]
-    parts += foot
+    foot = trimesh.boolean.union(
+        [trimesh.boolean.intersection([f, band], engine="manifold")
+         for f in foot], engine="manifold")
 
-    for i in range(n_pairs + 1):
-        za = ROW0_Z + i * PAIR_PITCH
-        parts += rope_row(width, length, corner_r, za, +1, TWIST_A_PHASE,
-                          strand_r, ply_e, ds, nphi)
-        if i < n_pairs:
-            parts += rope_row(width, length, corner_r, za + GAP_AB, -1,
-                              TWIST_B_PHASE, strand_r, ply_e, ds, nphi)
+    row_a = trimesh.boolean.union(
+        rope_row(width, length, corner_r, 0.0, +1, TWIST_A_PHASE,
+                 strand_r, ply_e, ds, nphi), engine="manifold")
+    row_b = trimesh.boolean.union(
+        rope_row(width, length, corner_r, 0.0, -1, TWIST_B_PHASE,
+                 strand_r, ply_e, ds, nphi), engine="manifold")
+    z_a = [ROW0_Z + i * PAIR_PITCH for i in range(n_pairs + 1)]
+    z_b = [ROW0_Z + GAP_AB + i * PAIR_PITCH for i in range(n_pairs)]
+    return {"base": base, "foot": foot, "row_a": row_a, "row_b": row_b,
+            "z_a": z_a, "z_b": z_b, "actual_h": actual_h}
 
-    print(f"unioning {len(parts)} parts...")
-    basket = trimesh.boolean.union(parts, engine="manifold")
+
+def build_basket(width, length, height, corner_r=CORNER_R_DEFAULT,
+                 strand_r=STRAND_R, ply_e=PLY_OFFSET, ds=0.35, nphi=18,
+                 parts=None):
+    """Single watertight union of the whole basket (heavy for tall baskets)."""
+    if parts is None:
+        parts = build_parts(width, length, height, corner_r, strand_r,
+                            ply_e, ds, nphi)
+    sol = [parts["base"], parts["foot"]]
+    for z in parts["z_a"]:
+        m = parts["row_a"].copy(); m.apply_translation((0, 0, z)); sol.append(m)
+    for z in parts["z_b"]:
+        m = parts["row_b"].copy(); m.apply_translation((0, 0, z)); sol.append(m)
+    print(f"unioning {len(sol)} parts...")
+    basket = trimesh.boolean.union(sol, engine="manifold")
     print(f"watertight={basket.is_watertight}  extents={np.round(basket.extents, 1)}"
           f"  volume={basket.volume / 1000:.1f} cm^3  faces={len(basket.faces)}")
     return basket
 
 
 # ------------------------- Bambu Studio project export -------------------------
-def export_bambu_project_3mf(mesh, path, name="Weave Basket", template_3mf=None):
-    """Write a Bambu Studio project 3MF (loads without the "invalid config,
-    load geometry data only" dialog).
+NSXML = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+         'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" '
+         'requiredextensions="p"')
+IDENT = "1 0 0 0 1 0 0 0 1 0 0 0"
+CONTENT_TYPES = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+ '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+ ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
+ ' <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
+ ' <Default Extension="png" ContentType="image/png"/>\n'
+ '</Types>')
+RELS = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+ '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+ ' <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />\n'
+ '</Relationships>')
+OBJ_RELS = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+ '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+ ' <Relationship Target="/3D/Objects/object_1.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
+ '</Relationships>')
+SLICE_INFO = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+ '<config>\n  <header>\n'
+ '    <header_item key="X-BBL-Client-Type" value="slicer"/>\n'
+ '    <header_item key="X-BBL-Client-Version" value="02.04.00.70"/>\n'
+ '  </header>\n</config>')
 
-    Bambu treats a 3MF as a project only when its Metadata/ config files are
-    present and consistent with the geometry, so this writes the full package:
-    geometry in 3D/Objects/object_1.model, an assembly in 3D/3dmodel.model,
-    and a matching model_settings.config. If template_3mf points to the
-    original WeaveBasketv3.3mf, its print profile (project_settings.config)
-    is carried over so the designer's tuned settings load too.
-    """
-    import io
+
+def _mesh_xml(buf, oid, mesh):
+    """Append one <object> element containing a mesh to the string buffer."""
     import uuid
-    import zipfile
-
-    V = np.asarray(mesh.vertices, dtype=np.float64)
-    F = np.asarray(mesh.faces, dtype=np.int64)
-    nsxml = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
-             'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" '
-             'requiredextensions="p"')
-
-    buf = io.StringIO()
-    buf.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-    buf.write(f'<model unit="millimeter" xml:lang="en-US" {nsxml}>\n')
-    buf.write(' <metadata name="BambuStudio:3mfVersion">1</metadata>\n')
-    buf.write(f' <resources>\n  <object id="1" p:UUID="{uuid.uuid4()}" type="model">\n'
+    buf.write(f'  <object id="{oid}" p:UUID="{uuid.uuid4()}" type="model">\n'
               '   <mesh>\n    <vertices>\n')
-    for x, y, z in V:
+    for x, y, z in np.asarray(mesh.vertices, dtype=np.float64):
         buf.write(f'     <vertex x="{x:.9g}" y="{y:.9g}" z="{z:.9g}"/>\n')
     buf.write('    </vertices>\n    <triangles>\n')
-    for a, b, c in F:
+    for a, b, c in np.asarray(mesh.faces, dtype=np.int64):
         buf.write(f'     <triangle v1="{a}" v2="{b}" v3="{c}"/>\n')
-    buf.write('    </triangles>\n   </mesh>\n  </object>\n </resources>\n</model>\n')
-    object_xml = buf.getvalue()
+    buf.write('    </triangles>\n   </mesh>\n  </object>\n')
 
-    ident = "1 0 0 0 1 0 0 0 1 0 0 0"
-    root_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" {nsxml} xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">
- <metadata name="Application">BambuStudio-02.04.00.70</metadata>
- <metadata name="BambuStudio:3mfVersion">1</metadata>
- <metadata name="Title">{name}</metadata>
- <resources>
-  <object id="2" p:UUID="{uuid.uuid4()}" type="model">
-   <components>
-    <component p:path="/3D/Objects/object_1.model" objectid="1" p:UUID="{uuid.uuid4()}" transform="{ident}" />
-   </components>
-  </object>
- </resources>
- <build p:UUID="{uuid.uuid4()}">
-  <item objectid="2" p:UUID="{uuid.uuid4()}" transform="1 0 0 0 1 0 0 0 1 128 128 0" printable="1" />
- </build>
-</model>
-'''
-    model_settings = f'''<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <object id="2">
-    <metadata key="name" value="{name}"/>
-    <metadata key="extruder" value="1"/>
-    <metadata face_count="{len(F)}"/>
-    <part id="1" subtype="normal_part">
-      <metadata key="name" value="Basket"/>
-      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>
-      <metadata key="source_object_id" value="0"/>
-      <metadata key="source_volume_id" value="0"/>
-      <metadata key="extruder" value="1"/>
-      <mesh_stat face_count="{len(F)}" edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
-    </part>
-  </object>
-  <plate>
-    <metadata key="plater_id" value="1"/>
-    <metadata key="plater_name" value=""/>
-    <metadata key="locked" value="false"/>
-    <model_instance>
-      <metadata key="object_id" value="2"/>
-      <metadata key="instance_id" value="0"/>
-      <metadata key="identify_id" value="84"/>
-    </model_instance>
-  </plate>
-  <assemble>
-   <assemble_item object_id="2" instance_id="0" transform="{ident}" offset="0 0 0" />
-  </assemble>
-</config>
-'''
-    content_types = '''<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
- <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
- <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
- <Default Extension="png" ContentType="image/png"/>
-</Types>'''
-    rels = '''<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
- <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
-</Relationships>'''
-    obj_rels = '''<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
- <Relationship Target="/3D/Objects/object_1.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
-</Relationships>'''
-    slice_info = '''<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <header>
-    <header_item key="X-BBL-Client-Type" value="slicer"/>
-    <header_item key="X-BBL-Client-Version" value="02.04.00.70"/>
-  </header>
-</config>'''
-    cut_info = '''<?xml version="1.0" encoding="utf-8"?>
-<objects>
- <object id="2">
-  <cut_id id="0" check_sum="1" connectors_cnt="0"/>
- </object>
-</objects>'''
 
+def _write_package(path, objects_xml, root_xml, model_settings, obj_id,
+                   template_3mf=None):
+    import zipfile
+    cut_info = ('<?xml version="1.0" encoding="utf-8"?>\n<objects>\n'
+                f' <object id="{obj_id}">\n'
+                '  <cut_id id="0" check_sum="1" connectors_cnt="0"/>\n'
+                ' </object>\n</objects>')
     project_settings = None
     if template_3mf and os.path.exists(template_3mf):
         try:
@@ -327,19 +283,136 @@ def export_bambu_project_3mf(mesh, path, name="Weave Basket", template_3mf=None)
             print(f"carrying print profile over from {os.path.basename(template_3mf)}")
         except KeyError:
             print("template has no project_settings.config; writing without profile")
-
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("[Content_Types].xml", content_types)
-        z.writestr("_rels/.rels", rels)
+        z.writestr("[Content_Types].xml", CONTENT_TYPES)
+        z.writestr("_rels/.rels", RELS)
         z.writestr("3D/3dmodel.model", root_xml)
-        z.writestr("3D/_rels/3dmodel.model.rels", obj_rels)
-        z.writestr("3D/Objects/object_1.model", object_xml)
+        z.writestr("3D/_rels/3dmodel.model.rels", OBJ_RELS)
+        z.writestr("3D/Objects/object_1.model", objects_xml)
         z.writestr("Metadata/model_settings.config", model_settings)
-        z.writestr("Metadata/slice_info.config", slice_info)
+        z.writestr("Metadata/slice_info.config", SLICE_INFO)
         z.writestr("Metadata/cut_information.xml", cut_info)
         z.writestr("Metadata/filament_sequence.json", '{"plate_1":{"sequence":[]}}')
         if project_settings is not None:
             z.writestr("Metadata/project_settings.config", project_settings)
+
+
+def _root_and_settings(name, components, total_faces):
+    """3dmodel.model + model_settings.config for a list of components.
+
+    components: list of (mesh_object_id, part_name, z_offset, face_count).
+    The assembly object id is max mesh id + 1.
+    """
+    import uuid
+    obj_id = max(c[0] for c in components) + 1
+    comp_lines, part_lines = [], []
+    for i, (mid, pname, z, fc) in enumerate(components):
+        comp_lines.append(
+            f'    <component p:path="/3D/Objects/object_1.model" objectid="{mid}" '
+            f'p:UUID="{uuid.uuid4()}" transform="1 0 0 0 1 0 0 0 1 0 0 {z:.9g}" />')
+        part_lines.append(
+            f'    <part id="{i + 1}" subtype="normal_part">\n'
+            f'      <metadata key="name" value="{pname}"/>\n'
+            f'      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 {z:.9g} 0 0 0 1"/>\n'
+            f'      <metadata key="source_object_id" value="{i}"/>\n'
+            f'      <metadata key="source_volume_id" value="0"/>\n'
+            f'      <metadata key="extruder" value="1"/>\n'
+            f'      <mesh_stat face_count="{fc}" edges_fixed="0" degenerate_facets="0"'
+            f' facets_removed="0" facets_reversed="0" backwards_edges="0"/>\n'
+            f'    </part>')
+    comp_block = "\n".join(comp_lines)
+    part_block = "\n".join(part_lines)
+    root_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<model unit="millimeter" xml:lang="en-US" {NSXML} '
+        'xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">\n'
+        ' <metadata name="Application">BambuStudio-02.04.00.70</metadata>\n'
+        ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
+        f' <metadata name="Title">{name}</metadata>\n'
+        ' <resources>\n'
+        f'  <object id="{obj_id}" p:UUID="{uuid.uuid4()}" type="model">\n'
+        '   <components>\n'
+        f'{comp_block}\n'
+        '   </components>\n'
+        '  </object>\n'
+        ' </resources>\n'
+        f' <build p:UUID="{uuid.uuid4()}">\n'
+        f'  <item objectid="{obj_id}" p:UUID="{uuid.uuid4()}" '
+        'transform="1 0 0 0 1 0 0 0 1 128 128 0" printable="1" />\n'
+        ' </build>\n'
+        '</model>\n')
+    model_settings = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<config>\n'
+        f'  <object id="{obj_id}">\n'
+        f'    <metadata key="name" value="{name}"/>\n'
+        '    <metadata key="extruder" value="1"/>\n'
+        f'    <metadata face_count="{total_faces}"/>\n'
+        f'{part_block}\n'
+        '  </object>\n'
+        '  <plate>\n'
+        '    <metadata key="plater_id" value="1"/>\n'
+        '    <metadata key="plater_name" value=""/>\n'
+        '    <metadata key="locked" value="false"/>\n'
+        '    <model_instance>\n'
+        f'      <metadata key="object_id" value="{obj_id}"/>\n'
+        '      <metadata key="instance_id" value="0"/>\n'
+        '      <metadata key="identify_id" value="84"/>\n'
+        '    </model_instance>\n'
+        '  </plate>\n'
+        '  <assemble>\n'
+        f'   <assemble_item object_id="{obj_id}" instance_id="0" '
+        f'transform="{IDENT}" offset="0 0 0" />\n'
+        '  </assemble>\n'
+        '</config>\n')
+    return root_xml, model_settings, obj_id
+
+
+def export_bambu_project_3mf(mesh, path, name="Weave Basket", template_3mf=None):
+    """Single-mesh Bambu Studio project 3MF (for already-unioned models)."""
+    import io
+    buf = io.StringIO()
+    buf.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+    buf.write(f'<model unit="millimeter" xml:lang="en-US" {NSXML}>\n')
+    buf.write(' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n')
+    _mesh_xml(buf, 1, mesh)
+    buf.write(' </resources>\n</model>\n')
+    comps = [(1, "Basket", 0.0, len(mesh.faces))]
+    root_xml, model_settings, obj_id = _root_and_settings(name, comps,
+                                                          len(mesh.faces))
+    _write_package(path, buf.getvalue(), root_xml, model_settings, obj_id,
+                   template_3mf)
+
+
+def export_bambu_assembly_3mf(parts, path, name="Weave Basket",
+                              template_3mf=None):
+    """Instanced Bambu project 3MF: each unique row mesh is stored once and
+    referenced at every height it repeats, so tall baskets stay small on disk
+    (the original WeaveBasketv3.3mf uses the same component structure, just
+    with the row meshes duplicated).
+    """
+    import io
+    buf = io.StringIO()
+    buf.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+    buf.write(f'<model unit="millimeter" xml:lang="en-US" {NSXML}>\n')
+    buf.write(' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n')
+    _mesh_xml(buf, 1, parts["base"])
+    _mesh_xml(buf, 2, parts["foot"])
+    _mesh_xml(buf, 3, parts["row_a"])
+    _mesh_xml(buf, 4, parts["row_b"])
+    buf.write(' </resources>\n</model>\n')
+
+    fa, fb = len(parts["row_a"].faces), len(parts["row_b"].faces)
+    comps = [(1, "Base", 0.0, len(parts["base"].faces)),
+             (2, "Foot", 0.0, len(parts["foot"].faces))]
+    comps += [(3, f"RowA_{i + 1}", z, fa) for i, z in enumerate(parts["z_a"])]
+    comps += [(4, f"RowB_{i + 1}", z, fb) for i, z in enumerate(parts["z_b"])]
+    total = sum(c[3] for c in comps)
+    root_xml, model_settings, obj_id = _root_and_settings(name, comps, total)
+    _write_package(path, buf.getvalue(), root_xml, model_settings, obj_id,
+                   template_3mf)
+    print(f"assembly 3MF: {len(comps)} parts from 4 unique meshes, "
+          f"{total} faces total when expanded")
 
 
 def main():
@@ -360,18 +433,25 @@ def main():
     ap.add_argument("--template", default=None,
                     help="path to the original WeaveBasketv3.3mf; its Bambu "
                          "print profile is embedded in the output 3MF")
+    ap.add_argument("--no-stl", action="store_true",
+                    help="skip the unioned STL (much faster for tall baskets; "
+                         "the instanced 3MF is written either way)")
     args = ap.parse_args()
 
-    basket = build_basket(args.width, args.length, args.height,
-                          args.corner_radius, args.strand_radius,
-                          ds=args.resolution)
+    parts = build_parts(args.width, args.length, args.height,
+                        args.corner_radius, args.strand_radius,
+                        ds=args.resolution)
     out = os.path.dirname(os.path.abspath(__file__))
-    stl = os.path.join(out, args.output + ".stl")
     tmf = os.path.join(out, args.output + ".3mf")
-    basket.export(stl)
-    export_bambu_project_3mf(basket, tmf, name=args.output,
-                             template_3mf=args.template)
-    print("wrote", stl, "and", tmf)
+    export_bambu_assembly_3mf(parts, tmf, name=args.output,
+                              template_3mf=args.template)
+    print("wrote", tmf)
+    if not args.no_stl:
+        basket = build_basket(args.width, args.length, args.height,
+                              parts=parts)
+        stl = os.path.join(out, args.output + ".stl")
+        basket.export(stl)
+        print("wrote", stl)
 
 
 if __name__ == "__main__":
