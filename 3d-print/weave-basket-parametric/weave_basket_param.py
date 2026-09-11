@@ -172,7 +172,8 @@ ROPE_H0 = 2 * (STRAND_R + PLY_OFFSET)   # original rope height (4.192 mm)
 
 
 def build_parts(width, length, height, corner_r=CORNER_R_DEFAULT,
-                rope_h=None, rope_d=None, stripe=None, ds=0.35, nphi=18):
+                rope_h=None, rope_d=None, stripe=None, ds=0.35, nphi=18,
+                base_t=BASE_T):
     """Build the unique meshes plus their placements (no union).
 
     rope_h / rope_d set the rope cross-section (vertical x radial, mm);
@@ -197,8 +198,8 @@ def build_parts(width, length, height, corner_r=CORNER_R_DEFAULT,
     pair = PAIR_PITCH * s
     gap_ab = GAP_AB * s
     half_h = rope_h / 2
-    if row0 - half_h > BASE_T - 0.3:
-        row0 = BASE_T - 0.3 + half_h     # keep the first row rooted in the base
+    if row0 - half_h > base_t - 0.3:
+        row0 = base_t - 0.3 + half_h     # keep the first row rooted in the base
 
     n_pairs = max(1, round((height - row0 - half_h) / pair))
     actual_h = row0 + n_pairs * pair + half_h
@@ -211,15 +212,15 @@ def build_parts(width, length, height, corner_r=CORNER_R_DEFAULT,
     print(f"twist: {n_half} half-turns, stripe pitch {P / n_half:.2f} mm "
           f"(target {stripe:.2f})")
 
-    base = base_slab(width, length, corner_r, BASE_T)
+    base = base_slab(width, length, corner_r, base_t)
 
     # foot ring around the base band, scaled like the wall rope
-    foot = rope_row(width, length, corner_r, min(FOOT_Z * s, BASE_T / 2), -1,
+    foot = rope_row(width, length, corner_r, min(FOOT_Z * s, base_t / 2), -1,
                     TWIST_B_PHASE, FOOT_R * s, FOOT_OFFSET * s, ds, nphi,
                     radial, stripe)
     big = max(width, length) + 4 * rope_d + 20
-    band = trimesh.creation.box(extents=(big, big, BASE_T))
-    band.apply_translation((0, 0, BASE_T / 2))
+    band = trimesh.creation.box(extents=(big, big, base_t))
+    band.apply_translation((0, 0, base_t / 2))
     foot = trimesh.boolean.union(
         [trimesh.boolean.intersection([f, band], engine="manifold")
          for f in foot], engine="manifold")
@@ -459,6 +460,8 @@ def main():
     ap.add_argument("--stripe-pitch", type=float, default=None,
                     help="arc length of one visible twist stripe, mm "
                          "(default scales with rope height)")
+    ap.add_argument("--base-thickness", type=float, default=BASE_T,
+                    help="solid base slab thickness, mm")
     ap.add_argument("--nphi", type=int, default=18,
                     help="facets around the rope strand (raise for fat ropes)")
     ap.add_argument("--resolution", type=float, default=0.35,
@@ -475,7 +478,8 @@ def main():
 
     parts = build_parts(args.width, args.length, args.height,
                         args.corner_radius, args.rope_height, args.rope_depth,
-                        args.stripe_pitch, ds=args.resolution, nphi=args.nphi)
+                        args.stripe_pitch, ds=args.resolution, nphi=args.nphi,
+                        base_t=args.base_thickness)
     out = os.path.dirname(os.path.abspath(__file__))
     tmf = os.path.join(out, args.output + ".3mf")
     export_bambu_assembly_3mf(parts, tmf, name=args.output,
