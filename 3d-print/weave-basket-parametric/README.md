@@ -35,9 +35,17 @@ python3 weave_basket_param.py --width 170 --length 110 --height 60 -o big_basket
   which shifts the stripe pitch by at most ~1 %.
 - `--height`: snapped to a whole number of rows (5.2 mm steps); the actual
   height is printed.
-- `--corner-radius` (default 10), `--strand-radius` (default 1.197) and
-  `--resolution` (sweep step, default 0.35 mm; use 0.5 for smaller files)
-  are also available.
+- `--rope-height` / `--rope-depth`: rope cross-section in mm (default the
+  original 4.19 x 4.19). Row spacing, foot, and twist scale with rope height;
+  depth sets wall thickness only — e.g. `--rope-height 16 --rope-depth 8`
+  for a chunky look. `--stripe-pitch` overrides the twist stripe length.
+- `--base-thickness` (default 3): thicker bases print as light, stiff
+  sandwich panels — use 5+ for storage duty.
+- `--corner-radius` (default 10), `--resolution` (sweep step, default
+  0.35 mm) and `--nphi` (strand facets; raise to ~28 for fat ropes) are
+  also available.
+- `--no-stl` skips the heavy merged STL; the 3MF stores each unique row
+  once and instances it per height, so even tall baskets stay ~8 MB.
 
 Outputs a watertight STL + a **Bambu Studio project 3MF** (full Metadata/
 config package, so it opens without the "invalid config, load geometry data
