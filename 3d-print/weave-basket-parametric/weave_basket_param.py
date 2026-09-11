@@ -120,15 +120,17 @@ def torus_grid_mesh(pts_ring):
 
 
 def rope_row(W, L, R, z_center, handed, phase, strand_r, ply_e,
-             ds=0.35, nphi=18):
+             ds=0.35, nphi=18, radial=1.0, stripe=HALF_TWIST):
     """A 2-ply twisted rope ring following the rounded-rect path.
 
     handed: +1 (row A) or -1 (row B). Twist count is rounded to a whole
     number of half-turns for seamless closure; pitch shifts imperceptibly.
+    radial < 1 squashes the rope toward the wall (elliptical cross-section);
+    stripe is the target arc length of one visible twist stripe.
     Returns a list of watertight meshes (one or two tori).
     """
     P = perimeter(W, L, R)
-    n_half = max(2, round(P / HALF_TWIST))
+    n_half = max(2, round(P / stripe))
     rate = handed * n_half * math.pi / P     # rad per mm, exact closure
 
     loops = 1 if n_half % 2 == 0 else 2      # odd half-turns: plies join into one loop
@@ -143,7 +145,7 @@ def rope_row(W, L, R, z_center, handed, phase, strand_r, ply_e,
         th = rate * s + phase + k * math.pi
         cd = ply_e * np.cos(th)              # ply center offset along outward normal
         cz = ply_e * np.sin(th)              # ... and along z
-        d_off = cd[:, None] + strand_r * np.cos(phi)[None, :]
+        d_off = radial * (cd[:, None] + strand_r * np.cos(phi)[None, :])
         z_off = cz[:, None] + strand_r * np.sin(phi)[None, :]
         X = px[:, None] + nxv[:, None] * d_off
         Y = py[:, None] + nyv[:, None] * d_off
@@ -166,32 +168,56 @@ def base_slab(W, L, R, thickness, seg=48):
 
 
 # --------------------------------- assembly -----------------------------------
+ROPE_H0 = 2 * (STRAND_R + PLY_OFFSET)   # original rope height (4.192 mm)
+
+
 def build_parts(width, length, height, corner_r=CORNER_R_DEFAULT,
-                strand_r=STRAND_R, ply_e=PLY_OFFSET, ds=0.35, nphi=18):
+                rope_h=None, rope_d=None, stripe=None, ds=0.35, nphi=18):
     """Build the unique meshes plus their placements (no union).
 
+    rope_h / rope_d set the rope cross-section (vertical x radial, mm);
+    default is the original 4.19 x 4.19. Row spacing, foot, and twist stripe
+    pitch scale proportionally with rope_h unless stripe is given explicitly.
     Returns a dict: named unique meshes and lists of z offsets where the two
-    row types repeat. Row meshes are centered on z=0; base/starter sit at
+    row types repeat. Row meshes are centered on z=0; base/foot sit at
     their absolute position.
     """
     corner_r = min(corner_r, width / 2 - 1, length / 2 - 1)
-    n_pairs = max(1, round((height - ROW0_Z - strand_r - PLY_OFFSET) / PAIR_PITCH))
-    top_a_z = ROW0_Z + n_pairs * PAIR_PITCH
-    actual_h = top_a_z + strand_r + ply_e
+    if rope_h is None:
+        rope_h = ROPE_H0
+    if rope_d is None:
+        rope_d = rope_h
+    s = rope_h / ROPE_H0                 # vertical scale vs. the original
+    radial = rope_d / rope_h
+    if stripe is None:
+        stripe = HALF_TWIST * s
+    strand_r = STRAND_R * s
+    ply_e = PLY_OFFSET * s
+    row0 = ROW0_Z * s
+    pair = PAIR_PITCH * s
+    gap_ab = GAP_AB * s
+    half_h = rope_h / 2
+    if row0 - half_h > BASE_T - 0.3:
+        row0 = BASE_T - 0.3 + half_h     # keep the first row rooted in the base
+
+    n_pairs = max(1, round((height - row0 - half_h) / pair))
+    actual_h = row0 + n_pairs * pair + half_h
     P = perimeter(width, length, corner_r)
-    n_half = max(2, round(P / HALF_TWIST))
+    n_half = max(2, round(P / stripe))
     print(f"outline {width} x {length}, corner R{corner_r}, perimeter {P:.1f} mm")
+    print(f"rope: {rope_h:.1f} tall x {rope_d:.1f} deep, row pitch {pair / 2:.2f}")
     print(f"rows: {n_pairs + 1} A + {n_pairs} B -> height {actual_h:.1f} mm "
           f"(requested {height})")
-    print(f"twist: {n_half} half-turns, pitch {P / n_half:.3f} mm "
-          f"(original {HALF_TWIST})")
+    print(f"twist: {n_half} half-turns, stripe pitch {P / n_half:.2f} mm "
+          f"(target {stripe:.2f})")
 
     base = base_slab(width, length, corner_r, BASE_T)
 
-    # foot/starter ring, trimmed flush to the base slab band
-    foot = rope_row(width, length, corner_r, FOOT_Z, -1, TWIST_B_PHASE,
-                    FOOT_R, FOOT_OFFSET, ds, nphi)
-    big = max(width, length) + 20
+    # foot ring around the base band, scaled like the wall rope
+    foot = rope_row(width, length, corner_r, min(FOOT_Z * s, BASE_T / 2), -1,
+                    TWIST_B_PHASE, FOOT_R * s, FOOT_OFFSET * s, ds, nphi,
+                    radial, stripe)
+    big = max(width, length) + 4 * rope_d + 20
     band = trimesh.creation.box(extents=(big, big, BASE_T))
     band.apply_translation((0, 0, BASE_T / 2))
     foot = trimesh.boolean.union(
@@ -200,23 +226,23 @@ def build_parts(width, length, height, corner_r=CORNER_R_DEFAULT,
 
     row_a = trimesh.boolean.union(
         rope_row(width, length, corner_r, 0.0, +1, TWIST_A_PHASE,
-                 strand_r, ply_e, ds, nphi), engine="manifold")
+                 strand_r, ply_e, ds, nphi, radial, stripe), engine="manifold")
     row_b = trimesh.boolean.union(
         rope_row(width, length, corner_r, 0.0, -1, TWIST_B_PHASE,
-                 strand_r, ply_e, ds, nphi), engine="manifold")
-    z_a = [ROW0_Z + i * PAIR_PITCH for i in range(n_pairs + 1)]
-    z_b = [ROW0_Z + GAP_AB + i * PAIR_PITCH for i in range(n_pairs)]
+                 strand_r, ply_e, ds, nphi, radial, stripe), engine="manifold")
+    z_a = [row0 + i * pair for i in range(n_pairs + 1)]
+    z_b = [row0 + gap_ab + i * pair for i in range(n_pairs)]
     return {"base": base, "foot": foot, "row_a": row_a, "row_b": row_b,
             "z_a": z_a, "z_b": z_b, "actual_h": actual_h}
 
 
 def build_basket(width, length, height, corner_r=CORNER_R_DEFAULT,
-                 strand_r=STRAND_R, ply_e=PLY_OFFSET, ds=0.35, nphi=18,
+                 rope_h=None, rope_d=None, stripe=None, ds=0.35, nphi=18,
                  parts=None):
     """Single watertight union of the whole basket (heavy for tall baskets)."""
     if parts is None:
-        parts = build_parts(width, length, height, corner_r, strand_r,
-                            ply_e, ds, nphi)
+        parts = build_parts(width, length, height, corner_r, rope_h,
+                            rope_d, stripe, ds, nphi)
     sol = [parts["base"], parts["foot"]]
     for z in parts["z_a"]:
         m = parts["row_a"].copy(); m.apply_translation((0, 0, z)); sol.append(m)
@@ -424,8 +450,17 @@ def main():
     ap.add_argument("--height", type=float, default=41.3,
                     help="target height, mm (snapped to whole rows)")
     ap.add_argument("--corner-radius", type=float, default=CORNER_R_DEFAULT)
-    ap.add_argument("--strand-radius", type=float, default=STRAND_R,
-                    help="rope strand radius (constant regardless of size)")
+    ap.add_argument("--rope-height", type=float, default=None,
+                    help="vertical size of one rope row, mm (default 4.19, "
+                         "the original); row spacing scales with it")
+    ap.add_argument("--rope-depth", type=float, default=None,
+                    help="radial size of the rope / wall thickness, mm "
+                         "(default = rope height)")
+    ap.add_argument("--stripe-pitch", type=float, default=None,
+                    help="arc length of one visible twist stripe, mm "
+                         "(default scales with rope height)")
+    ap.add_argument("--nphi", type=int, default=18,
+                    help="facets around the rope strand (raise for fat ropes)")
     ap.add_argument("--resolution", type=float, default=0.35,
                     help="sweep step along the rope, mm")
     ap.add_argument("-o", "--output", default="weave_basket",
@@ -439,8 +474,8 @@ def main():
     args = ap.parse_args()
 
     parts = build_parts(args.width, args.length, args.height,
-                        args.corner_radius, args.strand_radius,
-                        ds=args.resolution)
+                        args.corner_radius, args.rope_height, args.rope_depth,
+                        args.stripe_pitch, ds=args.resolution, nphi=args.nphi)
     out = os.path.dirname(os.path.abspath(__file__))
     tmf = os.path.join(out, args.output + ".3mf")
     export_bambu_assembly_3mf(parts, tmf, name=args.output,
